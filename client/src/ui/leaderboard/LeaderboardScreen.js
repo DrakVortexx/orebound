@@ -6,6 +6,7 @@ export class LeaderboardScreen {
     this.container = container;
     this.leaderboardData = [];
     this.isLoading = false;
+    this.onBack = null;
     this.render();
     this.loadLeaderboard();
   }

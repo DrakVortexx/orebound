@@ -35,18 +35,23 @@ class App {
       return;
     }
     
-    this.currentScreen.onAuthSuccess(() => {
-      this.showDashboard();
-    });
+    // Only set callback if auth screen was rendered
+    if (!this.currentScreen.isAuthSkipped) {
+      this.currentScreen.onAuthSuccess(() => {
+        this.showDashboard();
+      });
+    }
   }
 
   showDashboard() {
     this.cleanupCurrentScreen();
     
     this.currentScreen = new DashboardScreen(this.container);
+    
     this.currentScreen.onPlayClick(() => {
       this.showServerSelect();
     });
+    
     this.currentScreen.onLogout(() => {
       this.showAuthScreen();
     });

@@ -7,6 +7,8 @@ export class ServerSelectScreen {
     this.container = container;
     this.publicServers = [];
     this.isLoading = true;
+    this.onBack = null;
+    this.onServerJoin = null;
     this.render();
     this.loadServers();
   }

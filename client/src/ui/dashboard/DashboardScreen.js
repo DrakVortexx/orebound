@@ -7,6 +7,8 @@ export class DashboardScreen {
   constructor(container) {
     this.container = container;
     this.activities = [];
+    this.onPlayClick = null;
+    this.onLogout = null;
     this.render();
     this.loadActivity();
   }
