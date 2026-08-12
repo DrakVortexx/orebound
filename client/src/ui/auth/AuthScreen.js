@@ -4,20 +4,15 @@ import { api } from '../../networking/API.js';
 export class AuthScreen {
   constructor(container) {
     this.container = container;
-    this.currentMode = 'login'; // 'login' or 'signup'
-    this.isAuthSkipped = false;
-    this.onAuthSuccess = null;
+    this.currentMode = 'login';
+    this.isAuthenticated = false;
     
     // Check if user is already authenticated
     const existingToken = localStorage.getItem('authToken');
     if (existingToken) {
       api.setToken(existingToken);
-      this.isAuthSkipped = true;
-      // Skip auth screen and go to dashboard
-      gameState.currentScreen = 'dashboard';
-      // Try to fetch user data
+      this.isAuthenticated = true;
       this.fetchUserData();
-      // Don't call callback here - let parent handle it
       return;
     }
     
@@ -158,7 +153,7 @@ export class AuthScreen {
         response = await api.register(username, password);
       }
 
-      // Store token in localStorage and API
+      // Store token
       if (response.token) {
         localStorage.setItem('authToken', response.token);
         api.setToken(response.token);
@@ -170,9 +165,11 @@ export class AuthScreen {
         id: response.id
       });
 
-      // Navigate to dashboard
-      gameState.currentScreen = 'dashboard';
-      this.onAuthSuccess?.();
+      // Dispatch custom event for successful auth
+      const authSuccessEvent = new CustomEvent('authSuccess', {
+        detail: { user: response }
+      });
+      window.dispatchEvent(authSuccessEvent);
 
     } catch (error) {
       this.showError(error.message || 'Authentication failed');
@@ -187,10 +184,6 @@ export class AuthScreen {
     errorElement.style.display = 'block';
   }
 
-  onAuthSuccess(callback) {
-    this.onAuthSuccess = callback;
-  }
-
   async fetchUserData() {
     try {
       const userData = await api.getUserData();
@@ -199,18 +192,24 @@ export class AuthScreen {
           username: userData.username,
           id: userData.id
         });
+        
+        // Dispatch custom event for auto-auth
+        const authSuccessEvent = new CustomEvent('authSuccess', {
+          detail: { user: userData, autoAuth: true }
+        });
+        window.dispatchEvent(authSuccessEvent);
       }
     } catch (error) {
       console.error('Failed to fetch user data:', error);
       // If token is invalid, clear it and show auth screen
       api.clearToken();
-      this.isAuthSkipped = false;
+      this.isAuthenticated = false;
       this.render();
     }
   }
 
   destroy() {
-    if (!this.isAuthSkipped) {
+    if (!this.isAuthenticated) {
       this.container.innerHTML = '';
     }
   }

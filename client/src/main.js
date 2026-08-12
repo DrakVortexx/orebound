@@ -21,6 +21,11 @@ class App {
   }
 
   init() {
+    // Listen for auth success events
+    window.addEventListener('authSuccess', (e) => {
+      this.showDashboard();
+    });
+    
     this.showAuthScreen();
   }
 
@@ -29,17 +34,10 @@ class App {
     
     this.currentScreen = new AuthScreen(this.container);
     
-    // Check if auth was skipped (user already has token)
-    if (this.currentScreen.isAuthSkipped) {
-      this.showDashboard();
+    // Check if user is already authenticated
+    if (this.currentScreen.isAuthenticated) {
+      // Let the event handler handle navigation
       return;
-    }
-    
-    // Only set callback if auth screen was rendered
-    if (!this.currentScreen.isAuthSkipped) {
-      this.currentScreen.onAuthSuccess(() => {
-        this.showDashboard();
-      });
     }
   }
 
