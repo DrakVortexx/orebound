@@ -6,7 +6,6 @@ export class LeaderboardScreen {
     this.container = container;
     this.leaderboardData = [];
     this.isLoading = false;
-    this.onBack = null;
     this.render();
     this.loadLeaderboard();
   }
@@ -120,10 +119,12 @@ export class LeaderboardScreen {
 
   attachEventListeners() {
     const backBtn = this.container.querySelector('#backBtn');
-    backBtn.addEventListener('click', () => {
-      const backEvent = new CustomEvent('leaderboardBack');
-      window.dispatchEvent(backEvent);
-    });
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        const backEvent = new CustomEvent('leaderboardBack');
+        window.dispatchEvent(backEvent);
+      });
+    }
   }
 
   async loadLeaderboard() {
@@ -153,5 +154,6 @@ export class LeaderboardScreen {
 
   destroy() {
     this.container.innerHTML = '';
+    this.container.style.background = '';
   }
 }

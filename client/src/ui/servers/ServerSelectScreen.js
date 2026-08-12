@@ -23,6 +23,7 @@ export class ServerSelectScreen {
     }
     this.isLoading = false;
     this.render();
+    this.attachEventListeners();
   }
 
   render() {
@@ -46,7 +47,10 @@ export class ServerSelectScreen {
       </div>
     `;
 
-    this.attachEventListeners();
+    // Only attach event listeners if not loading
+    if (!this.isLoading) {
+      this.attachEventListeners();
+    }
   }
 
   renderLoading() {

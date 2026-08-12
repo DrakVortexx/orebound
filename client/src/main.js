@@ -50,6 +50,9 @@ class App {
     window.addEventListener('leaderboardBack', () => {
       if (this.currentScreen instanceof DashboardScreen) {
         this.currentScreen.closeLeaderboard();
+      } else {
+        // If somehow not on dashboard, go back to dashboard
+        this.showDashboard();
       }
     });
     

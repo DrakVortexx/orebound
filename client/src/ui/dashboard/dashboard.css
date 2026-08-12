@@ -5,7 +5,7 @@
   width: 100%;
   height: 100%;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: #0f0f1a;
+  background: #232527;
   overflow: hidden;
 }
 
@@ -15,10 +15,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: 
-    radial-gradient(ellipse at top right, rgba(120, 119, 198, 0.15) 0%, transparent 50%),
-    radial-gradient(ellipse at bottom left, rgba(255, 119, 198, 0.1) 0%, transparent 50%),
-    linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 100%);
+  background: linear-gradient(180deg, #393b3d 0%, #232527 100%);
   z-index: 0;
 }
 
@@ -28,19 +25,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 2rem;
-  background: rgba(15, 15, 26, 0.8);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.75rem 1.5rem;
+  background: #2e3032;
+  border-bottom: 1px solid #4a4a4a;
 }
 
 .nav-logo h1 {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: #ffd700;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffffff;
   margin: 0;
-  letter-spacing: 0.1em;
-  text-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+  letter-spacing: -0.01em;
 }
 
 .nav-menu {
@@ -49,15 +44,15 @@
 }
 
 .nav-btn {
-  padding: 0.75rem 1.5rem;
+  padding: 0.5rem 1rem;
   background: transparent;
   border: none;
-  color: #a0a0a0;
-  font-size: 0.95rem;
+  color: #b8b8b8;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  border-radius: 8px;
-  transition: all 0.3s ease;
+  border-radius: 4px;
+  transition: all 0.2s ease;
 }
 
 .nav-btn:hover {
@@ -66,8 +61,8 @@
 }
 
 .nav-btn.active {
-  background: rgba(255, 215, 0, 0.15);
-  color: #ffd700;
+  background: #ffffff;
+  color: #000000;
 }
 
 .nav-user {
@@ -79,23 +74,23 @@
 .user-name {
   color: #ffffff;
   font-weight: 600;
+  font-size: 0.9rem;
 }
 
 .logout-btn {
   padding: 0.5rem 1rem;
-  background: rgba(255, 0, 0, 0.2);
-  border: 1px solid rgba(255, 0, 0, 0.3);
-  border-radius: 6px;
-  color: #ff6b6b;
+  background: #e74c3c;
+  border: none;
+  border-radius: 4px;
+  color: #ffffff;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 }
 
 .logout-btn:hover {
-  background: rgba(255, 0, 0, 0.3);
-  color: #ff5252;
+  background: #c0392b;
 }
 
 .dashboard-main {
