@@ -37,7 +37,10 @@ export class Game {
     // Initialize game UI
     this.gameUI = new GameUI(this.container);
     this.gameUI.show();
-    this.gameUI.onLeaveServer(() => this.leaveServer());
+    // Listen for game leave events
+    window.addEventListener('gameLeave', () => {
+      this.leaveServer();
+    });
 
     // Setup player controller callbacks
     this.setupPlayerCallbacks();
@@ -305,10 +308,12 @@ export class Game {
     this.stop();
     gameState.currentScreen = 'dashboard';
     gameState.inGame = false;
-    this.onLeave?.();
+    const gameLeaveEvent = new CustomEvent('gameLeave');
+    window.dispatchEvent(gameLeaveEvent);
   }
 
   stop() {
+    this.isRunning = false;
     this.isRunning = false;
 
     if (this.payoutInterval) {
@@ -332,9 +337,5 @@ export class Game {
 
     // Clean up ores
     this.ores.clear();
-  }
-
-  onLeave(callback) {
-    this.onLeave = callback;
   }
 }

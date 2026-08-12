@@ -237,7 +237,8 @@ export class DashboardScreen {
     const playBtn = this.container.querySelector('#playBtn');
     playBtn.addEventListener('click', () => {
       gameState.currentScreen = 'serverSelect';
-      this.onPlayClick?.();
+      const playEvent = new CustomEvent('playClick');
+      window.dispatchEvent(playEvent);
     });
 
     // Leaderboard button
@@ -255,7 +256,8 @@ export class DashboardScreen {
         console.error('Logout error:', error);
       }
       gameState.reset();
-      this.onLogout?.();
+      const logoutEvent = new CustomEvent('logout');
+      window.dispatchEvent(logoutEvent);
     });
   }
 
@@ -281,19 +283,14 @@ export class DashboardScreen {
   showLeaderboard() {
     if (!this.leaderboardScreen) {
       this.leaderboardScreen = new LeaderboardScreen(this.container);
-      this.leaderboardScreen.onBack(() => {
-        this.leaderboardScreen.destroy();
-        this.leaderboardScreen = null;
-      });
     }
   }
 
-  onPlayClick(callback) {
-    this.onPlayClick = callback;
-  }
-
-  onLogout(callback) {
-    this.onLogout = callback;
+  closeLeaderboard() {
+    if (this.leaderboardScreen) {
+      this.leaderboardScreen.destroy();
+      this.leaderboardScreen = null;
+    }
   }
 
   update() {

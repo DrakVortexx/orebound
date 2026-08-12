@@ -155,7 +155,10 @@ export class GameUI {
     resumeBtn.addEventListener('click', () => this.toggleMenu());
 
     const leaveBtn = this.container.querySelector('#leaveBtn');
-    leaveBtn.addEventListener('click', () => this.onLeaveServer?.());
+    leaveBtn.addEventListener('click', () => {
+      const leaveEvent = new CustomEvent('gameLeave');
+      window.dispatchEvent(leaveEvent);
+    });
 
     // Inventory panel
     const closeInventoryBtn = this.container.querySelector('#closeInventoryBtn');
@@ -305,10 +308,6 @@ export class GameUI {
       money: '💰'
     };
     return icons[type] || 'ℹ️';
-  }
-
-  onLeaveServer(callback) {
-    this.onLeaveServer = callback;
   }
 
   destroy() {

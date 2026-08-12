@@ -121,7 +121,8 @@ export class LeaderboardScreen {
   attachEventListeners() {
     const backBtn = this.container.querySelector('#backBtn');
     backBtn.addEventListener('click', () => {
-      this.onBack?.();
+      const backEvent = new CustomEvent('leaderboardBack');
+      window.dispatchEvent(backEvent);
     });
   }
 
@@ -148,10 +149,6 @@ export class LeaderboardScreen {
       rank: index + 1,
       isCurrentUser: player.username === (gameState.user?.username || '')
     }));
-  }
-
-  onBack(callback) {
-    this.onBack = callback;
   }
 
   destroy() {

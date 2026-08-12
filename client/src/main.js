@@ -26,6 +26,46 @@ class App {
       this.showDashboard();
     });
     
+    // Listen for play click events
+    window.addEventListener('playClick', () => {
+      this.showServerSelect();
+    });
+    
+    // Listen for logout events
+    window.addEventListener('logout', () => {
+      this.showAuthScreen();
+    });
+    
+    // Listen for server back events
+    window.addEventListener('serverBack', () => {
+      this.showDashboard();
+    });
+    
+    // Listen for server join events
+    window.addEventListener('serverJoin', (e) => {
+      this.startGame();
+    });
+    
+    // Listen for leaderboard back events
+    window.addEventListener('leaderboardBack', () => {
+      if (this.currentScreen instanceof DashboardScreen) {
+        this.currentScreen.closeLeaderboard();
+      }
+    });
+    
+    // Listen for game leave events
+    window.addEventListener('gameLeave', () => {
+      this.showDashboard();
+    });
+    
+    // Listen for shop back events
+    window.addEventListener('shopBack', () => {
+      if (this.currentScreen instanceof DashboardScreen) {
+        this.currentScreen.shopScreen?.destroy();
+        this.currentScreen.shopScreen = null;
+      }
+    });
+    
     this.showAuthScreen();
   }
 
@@ -45,14 +85,6 @@ class App {
     this.cleanupCurrentScreen();
     
     this.currentScreen = new DashboardScreen(this.container);
-    
-    this.currentScreen.onPlayClick(() => {
-      this.showServerSelect();
-    });
-    
-    this.currentScreen.onLogout(() => {
-      this.showAuthScreen();
-    });
   }
 
   showServerSelect() {

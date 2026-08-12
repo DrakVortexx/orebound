@@ -131,7 +131,8 @@ export class ServerSelectScreen {
     const backBtn = this.container.querySelector('#backBtn');
     backBtn.addEventListener('click', () => {
       gameState.currentScreen = 'dashboard';
-      this.onBack?.();
+      const backEvent = new CustomEvent('serverBack');
+      window.dispatchEvent(backEvent);
     });
 
     // Random server button
@@ -164,15 +165,8 @@ export class ServerSelectScreen {
     gameState.selectedServer = server;
     gameState.currentScreen = 'game';
     gameState.inGame = true;
-    this.onServerJoin?.(server);
-  }
-
-  onBack(callback) {
-    this.onBack = callback;
-  }
-
-  onServerJoin(callback) {
-    this.onServerJoin = callback;
+    const serverJoinEvent = new CustomEvent('serverJoin', { detail: { server } });
+    window.dispatchEvent(serverJoinEvent);
   }
 
   destroy() {

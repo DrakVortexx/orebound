@@ -281,7 +281,8 @@ export class ShopScreen {
     // Back button
     const backBtn = this.container.querySelector('#backBtn');
     backBtn.addEventListener('click', () => {
-      this.onBack?.();
+      const shopBackEvent = new CustomEvent('shopBack');
+      window.dispatchEvent(shopBackEvent);
     });
 
     // Tab switching
@@ -343,7 +344,8 @@ export class ShopScreen {
     const result = sellingSystem.sell(oreId, quantity);
     if (result.success) {
       this.render();
-      this.onTransaction?.(result);
+      const transactionEvent = new CustomEvent('shopTransaction', { detail: { result } });
+      window.dispatchEvent(transactionEvent);
     }
   }
 
@@ -351,7 +353,8 @@ export class ShopScreen {
     const result = sellingSystem.sellAll();
     if (result.success) {
       this.render();
-      this.onTransaction?.(result);
+      const transactionEvent = new CustomEvent('shopTransaction', { detail: { result } });
+      window.dispatchEvent(transactionEvent);
     }
   }
 
@@ -359,7 +362,8 @@ export class ShopScreen {
     const result = crateSystem.purchaseCrate(crateType);
     if (result.success) {
       this.render();
-      this.onTransaction?.(result);
+      const transactionEvent = new CustomEvent('shopTransaction', { detail: { result } });
+      window.dispatchEvent(transactionEvent);
     }
   }
 
@@ -393,18 +397,13 @@ export class ShopScreen {
     gameState.expandPlot();
     
     this.render();
-    this.onTransaction?.({
-      success: true,
-      message: `Plot expanded to level ${gameState.plot.size}`
+    const expansionEvent = new CustomEvent('shopTransaction', { 
+      detail: {
+        success: true,
+        message: `Plot expanded to level ${gameState.plot.size}`
+      }
     });
-  }
-
-  onBack(callback) {
-    this.onBack = callback;
-  }
-
-  onTransaction(callback) {
-    this.onTransaction = callback;
+    window.dispatchEvent(expansionEvent);
   }
 
   destroy() {
