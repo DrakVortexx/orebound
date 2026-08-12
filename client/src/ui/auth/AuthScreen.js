@@ -5,6 +5,19 @@ export class AuthScreen {
   constructor(container) {
     this.container = container;
     this.currentMode = 'login'; // 'login' or 'signup'
+    this.isAuthSkipped = false;
+    
+    // Check if user is already authenticated
+    const existingToken = localStorage.getItem('authToken');
+    if (existingToken) {
+      api.setToken(existingToken);
+      this.isAuthSkipped = true;
+      // Skip auth screen and go to dashboard
+      gameState.currentScreen = 'dashboard';
+      this.onAuthSuccess?.();
+      return;
+    }
+    
     this.render();
   }
 
@@ -142,8 +155,9 @@ export class AuthScreen {
         response = await api.register(username, password);
       }
 
-      // Store token
+      // Store token in localStorage and API
       if (response.token) {
+        localStorage.setItem('authToken', response.token);
         api.setToken(response.token);
       }
 
@@ -175,6 +189,8 @@ export class AuthScreen {
   }
 
   destroy() {
-    this.container.innerHTML = '';
+    if (!this.isAuthSkipped) {
+      this.container.innerHTML = '';
+    }
   }
 }

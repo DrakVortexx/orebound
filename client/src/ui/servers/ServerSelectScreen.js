@@ -1,52 +1,26 @@
 import { gameState } from '../../game/GameState.js';
 import { GAME_CONFIG } from '../../game/GameConfig.js';
+import { api } from '../../networking/API.js';
 
 export class ServerSelectScreen {
   constructor(container) {
     this.container = container;
-    this.publicServers = this.generatePublicServers();
+    this.publicServers = [];
+    this.isLoading = true;
     this.render();
+    this.loadServers();
   }
 
-  generatePublicServers() {
-    return [
-      {
-        id: 'server-1',
-        name: 'US East',
-        region: 'North America',
-        playerCount: Math.floor(Math.random() * GAME_CONFIG.MAX_PLAYERS_PER_SERVER),
-        maxPlayers: GAME_CONFIG.MAX_PLAYERS_PER_SERVER,
-        status: 'online',
-        ping: Math.floor(Math.random() * 50) + 20
-      },
-      {
-        id: 'server-2',
-        name: 'US West',
-        region: 'North America',
-        playerCount: Math.floor(Math.random() * GAME_CONFIG.MAX_PLAYERS_PER_SERVER),
-        maxPlayers: GAME_CONFIG.MAX_PLAYERS_PER_SERVER,
-        status: 'online',
-        ping: Math.floor(Math.random() * 50) + 30
-      },
-      {
-        id: 'server-3',
-        name: 'Europe Central',
-        region: 'Europe',
-        playerCount: Math.floor(Math.random() * GAME_CONFIG.MAX_PLAYERS_PER_SERVER),
-        maxPlayers: GAME_CONFIG.MAX_PLAYERS_PER_SERVER,
-        status: 'online',
-        ping: Math.floor(Math.random() * 50) + 60
-      },
-      {
-        id: 'server-4',
-        name: 'Asia Pacific',
-        region: 'Asia',
-        playerCount: Math.floor(Math.random() * GAME_CONFIG.MAX_PLAYERS_PER_SERVER),
-        maxPlayers: GAME_CONFIG.MAX_PLAYERS_PER_SERVER,
-        status: 'online',
-        ping: Math.floor(Math.random() * 50) + 100
-      }
-    ];
+  async loadServers() {
+    try {
+      const servers = await api.getServers();
+      this.publicServers = servers;
+    } catch (error) {
+      console.error('Failed to load servers:', error);
+      this.publicServers = [];
+    }
+    this.isLoading = false;
+    this.render();
   }
 
   render() {
@@ -64,34 +38,52 @@ export class ServerSelectScreen {
           </header>
 
           <div class="server-select-body">
-            <div class="server-options">
-              <div class="server-option-card random-server">
-                <div class="option-icon">🎲</div>
-                <h2>Random Server</h2>
-                <p>Automatically join an available public server</p>
-                <button class="option-btn" id="randomServerBtn">Join Random</button>
-              </div>
-
-              <div class="server-option-card private-server">
-                <div class="option-icon">🔒</div>
-                <h2>Private Server</h2>
-                <p>Create or join a private server with friends</p>
-                <button class="option-btn disabled" disabled>Coming Soon</button>
-              </div>
-            </div>
-
-            <div class="public-servers">
-              <h2>Public Servers</h2>
-              <div class="server-list">
-                ${this.publicServers.map(server => this.renderServerCard(server)).join('')}
-              </div>
-            </div>
+            ${this.isLoading ? this.renderLoading() : this.renderServerContent()}
           </div>
         </div>
       </div>
     `;
 
     this.attachEventListeners();
+  }
+
+  renderLoading() {
+    return `
+      <div class="loading-state">
+        <div class="loading-spinner"></div>
+        <p>Loading servers...</p>
+      </div>
+    `;
+  }
+
+  renderServerContent() {
+    return `
+      <div class="server-options">
+        <div class="server-option-card random-server">
+          <div class="option-icon">🎲</div>
+          <h2>Random Server</h2>
+          <p>Automatically join an available public server</p>
+          <button class="option-btn" id="randomServerBtn">Join Random</button>
+        </div>
+
+        <div class="server-option-card private-server">
+          <div class="option-icon">🔒</div>
+          <h2>Private Server</h2>
+          <p>Create or join a private server with friends</p>
+          <button class="option-btn disabled" disabled>Coming Soon</button>
+        </div>
+      </div>
+
+      <div class="public-servers">
+        <h2>Public Servers</h2>
+        <div class="server-list">
+          ${this.publicServers.length > 0 
+            ? this.publicServers.map(server => this.renderServerCard(server)).join('')
+            : '<p class="no-servers">No servers available</p>'
+          }
+        </div>
+      </div>
+    `;
   }
 
   renderServerCard(server) {

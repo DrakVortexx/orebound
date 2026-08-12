@@ -1,11 +1,25 @@
 import { gameState } from '../../game/GameState.js';
+import { api } from '../../networking/API.js';
 import { LeaderboardScreen } from '../leaderboard/LeaderboardScreen.js';
 import '../leaderboard/leaderboard.css';
 
 export class DashboardScreen {
   constructor(container) {
     this.container = container;
+    this.activities = [];
     this.render();
+    this.loadActivity();
+  }
+
+  async loadActivity() {
+    try {
+      const activities = await api.getActivity();
+      this.activities = activities;
+      this.render();
+    } catch (error) {
+      console.error('Failed to load activity:', error);
+      this.activities = [];
+    }
   }
 
   render() {
@@ -88,21 +102,16 @@ export class DashboardScreen {
             <div class="recent-activity">
               <h3>Recent Activity</h3>
               <div class="activity-list">
-                <div class="activity-item">
-                  <span class="activity-time">2 min ago</span>
-                  <span class="activity-text">Sold 15 Copper ore</span>
-                  <span class="activity-value">+$120</span>
-                </div>
-                <div class="activity-item">
-                  <span class="activity-time">5 min ago</span>
-                  <span class="activity-text">Opened Common Crate</span>
-                  <span class="activity-value">Basic Generator</span>
-                </div>
-                <div class="activity-item">
-                  <span class="activity-time">10 min ago</span>
-                  <span class="activity-text">Mined Diamond ore</span>
-                  <span class="activity-value">+1 Diamond</span>
-                </div>
+                ${this.activities.length > 0 
+                  ? this.activities.map(activity => `
+                      <div class="activity-item">
+                        <span class="activity-time">${activity.time || 'Just now'}</span>
+                        <span class="activity-text">${activity.text}</span>
+                        <span class="activity-value">${activity.value}</span>
+                      </div>
+                    `).join('')
+                  : '<p class="no-activity">No recent activity</p>'
+                }
               </div>
             </div>
           </section>
@@ -237,7 +246,12 @@ export class DashboardScreen {
 
     // Logout button
     const logoutBtn = this.container.querySelector('#logoutBtn');
-    logoutBtn.addEventListener('click', () => {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await api.logout();
+      } catch (error) {
+        console.error('Logout error:', error);
+      }
       gameState.reset();
       this.onLogout?.();
     });

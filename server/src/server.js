@@ -4,6 +4,7 @@ import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { testDatabase } from "./db.js";
 import authRoutes from "./routes/auth.js";
+import gameRoutes from "./routes/game.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -19,6 +20,7 @@ app.use(
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api", gameRoutes);
 
 /*
  * Health check

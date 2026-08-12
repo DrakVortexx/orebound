@@ -1,18 +1,25 @@
 const API_BASE = 'https://orebound-api.onrender.com/api';
+const GAME_BASE = 'https://orebound.onrender.com';
 
 class API {
   constructor() {
-    this.token = null;
+    this.token = localStorage.getItem('authToken') || null;
     this.ws = null;
     this.wsConnected = false;
   }
 
   setToken(token) {
     this.token = token;
+    if (token) {
+      localStorage.setItem('authToken', token);
+    } else {
+      localStorage.removeItem('authToken');
+    }
   }
 
   clearToken() {
     this.token = null;
+    localStorage.removeItem('authToken');
   }
 
   async request(endpoint, options = {}) {
@@ -150,6 +157,16 @@ class API {
   // Leaderboard
   async getLeaderboard() {
     return this.get('/leaderboard');
+  }
+
+  // Servers
+  async getServers() {
+    return this.get('/servers');
+  }
+
+  // Activity
+  async getActivity() {
+    return this.get('/activity');
   }
 
   // WebSocket connection

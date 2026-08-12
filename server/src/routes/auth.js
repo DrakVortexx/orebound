@@ -1,14 +1,25 @@
 import express from "express";
 import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 import { pool } from "../db.js";
 
 const router = express.Router();
 
 const SALT_ROUNDS = 10;
+const JWT_SECRET = process.env.JWT_SECRET || 'orebound-secret-key-change-in-production';
+const JWT_EXPIRES_IN = '7d';
 
 const USERNAME_MIN_LENGTH = 3;
 const USERNAME_MAX_LENGTH = 30;
 const PASSWORD_MIN_LENGTH = 8;
+
+function generateToken(user) {
+  return jwt.sign(
+    { id: user.id, username: user.username },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
 
 function validateUsername(username) {
   if (!username || typeof username !== "string") {
@@ -77,14 +88,15 @@ router.post("/register", async (req, res) => {
 
     const user = result.rows[0];
 
+    const token = generateToken(user);
+
     res.status(201).json({
       ok: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        money: user.money,
-        created_at: user.created_at
-      }
+      token,
+      id: user.id,
+      username: user.username,
+      money: user.money,
+      created_at: user.created_at
     });
   } catch (error) {
     console.error("Registration error:", error);
@@ -136,14 +148,15 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    const token = generateToken(user);
+
     res.json({
       ok: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        money: user.money,
-        created_at: user.created_at
-      }
+      token,
+      id: user.id,
+      username: user.username,
+      money: user.money,
+      created_at: user.created_at
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -154,4 +167,69 @@ router.post("/login", async (req, res) => {
   }
 });
 
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({
+      ok: false,
+      error: "Access token required"
+    });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({
+        ok: false,
+        error: "Invalid or expired token"
+      });
+    }
+
+    req.user = user;
+    next();
+  });
+}
+
+router.post("/logout", authenticateToken, async (req, res) => {
+  try {
+    // In a real implementation, you might want to blacklist the token
+    // For now, we just return success since the client will remove the token
+    res.json({
+      ok: true,
+      message: "Logged out successfully"
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(500).json({
+      ok: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+// Leaderboard endpoint
+router.get("/leaderboard", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT username, money FROM players ORDER BY money DESC LIMIT 50"
+    );
+
+    const leaderboard = result.rows.map((player, index) => ({
+      username: player.username,
+      money: parseInt(player.money),
+      rank: index + 1
+    }));
+
+    res.json(leaderboard);
+  } catch (error) {
+    console.error("Leaderboard error:", error);
+    res.status(500).json({
+      ok: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+export { authenticateToken };
 export default router;

@@ -1,4 +1,5 @@
 import { api } from '../../networking/API.js';
+import { gameState } from '../../game/GameState.js';
 
 export class LeaderboardScreen {
   constructor(container) {
@@ -132,8 +133,7 @@ export class LeaderboardScreen {
       this.leaderboardData = this.processLeaderboardData(data);
     } catch (error) {
       console.error('Failed to load leaderboard:', error);
-      // Use mock data for now
-      this.leaderboardData = this.generateMockLeaderboard();
+      this.leaderboardData = [];
     }
 
     this.isLoading = false;
@@ -145,28 +145,7 @@ export class LeaderboardScreen {
     return data.map((player, index) => ({
       ...player,
       rank: index + 1,
-      isCurrentUser: player.username === 'current_user' // Would use actual user comparison
-    }));
-  }
-
-  generateMockLeaderboard() {
-    const mockPlayers = [
-      { username: 'MiningKing', money: 15000000 },
-      { username: 'OreMaster', money: 12500000 },
-      { username: 'CrystalHunter', money: 9800000 },
-      { username: 'DiamondBaron', money: 7500000 },
-      { username: 'GoldRush', money: 5200000 },
-      { username: 'IronGiant', money: 3800000 },
-      { username: 'CoalMiner', money: 2100000 },
-      { username: 'StoneBreaker', money: 1500000 },
-      { username: 'NewbieMiner', money: 750000 },
-      { username: 'StarterJoe', money: 250000 }
-    ];
-
-    return mockPlayers.map((player, index) => ({
-      ...player,
-      rank: index + 1,
-      isCurrentUser: false
+      isCurrentUser: player.username === (gameState.user?.username || '')
     }));
   }
 
