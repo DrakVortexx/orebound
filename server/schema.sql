@@ -11,6 +11,17 @@ CREATE TABLE IF NOT EXISTS players (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Add password_hash column if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'players' AND column_name = 'password_hash'
+    ) THEN
+        ALTER TABLE players ADD COLUMN password_hash VARCHAR(255);
+    END IF;
+END $$;
+
 -- =========================
 -- INVENTORY
 -- =========================

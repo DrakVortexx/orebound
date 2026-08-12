@@ -3,6 +3,7 @@ import cors from "cors";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { testDatabase } from "./db.js";
+import authRoutes from "./routes/auth.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -16,6 +17,8 @@ app.use(
 );
 
 app.use(express.json());
+
+app.use("/api/auth", authRoutes);
 
 /*
  * Health check
@@ -46,6 +49,18 @@ app.get("/api/health/database", async (req, res) => {
       ok: false,
       database: "error"
     });
+  }
+});
+
+// 404 handler for API routes
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    res.status(404).json({
+      ok: false,
+      error: "Endpoint not found"
+    });
+  } else {
+    next();
   }
 });
 
