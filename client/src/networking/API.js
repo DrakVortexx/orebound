@@ -33,13 +33,37 @@ class API {
 
     try {
       const response = await fetch(url, config);
-      const data = await response.json();
-
+      
+      // Check if response is OK first
       if (!response.ok) {
-        throw new Error(data.message || 'API request failed');
+        // Try to get error message from response body
+        let errorMessage = 'API request failed';
+        try {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            errorMessage = errorData.message || errorMessage;
+          } else {
+            const textData = await response.text();
+            errorMessage = textData || errorMessage;
+          }
+        } catch (parseError) {
+          // If we can't parse the error, use the status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
-      return data;
+      // Try to parse JSON response
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        return data;
+      } else {
+        // Return text response if not JSON
+        const textData = await response.text();
+        return textData;
+      }
     } catch (error) {
       console.error('API Error:', error);
       throw error;
