@@ -1,65 +1,85 @@
-import * as THREE from "three";
-import "./style.css";
+import { AuthScreen } from './ui/auth/AuthScreen.js';
+import { DashboardScreen } from './ui/dashboard/DashboardScreen.js';
+import { ServerSelectScreen } from './ui/servers/ServerSelectScreen.js';
+import { Game } from './game/Game.js';
+import { gameState } from './game/GameState.js';
+import './ui/auth/auth.css';
+import './ui/dashboard/dashboard.css';
+import './ui/servers/server-select.css';
+import './ui/game-ui.css';
+import './ui/shop/shop.css';
+import './ui/leaderboard/leaderboard.css';
+import './ui/tutorial/tutorial.css';
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
+class App {
+  constructor() {
+    this.container = document.getElementById('app');
+    this.currentScreen = null;
+    this.game = null;
+    
+    this.init();
+  }
 
-const camera = new THREE.PerspectiveCamera(
-  75,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
-);
+  init() {
+    this.showAuthScreen();
+  }
 
-camera.position.set(8, 8, 8);
-camera.lookAt(0, 0, 0);
+  showAuthScreen() {
+    this.cleanupCurrentScreen();
+    
+    this.currentScreen = new AuthScreen(this.container);
+    this.currentScreen.onAuthSuccess(() => {
+      this.showDashboard();
+    });
+  }
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
+  showDashboard() {
+    this.cleanupCurrentScreen();
+    
+    this.currentScreen = new DashboardScreen(this.container);
+    this.currentScreen.onPlayClick(() => {
+      this.showServerSelect();
+    });
+    this.currentScreen.onLogout(() => {
+      this.showAuthScreen();
+    });
+  }
 
-document.getElementById("app").innerHTML = "";
-document.getElementById("app").appendChild(renderer.domElement);
+  showServerSelect() {
+    this.cleanupCurrentScreen();
+    
+    this.currentScreen = new ServerSelectScreen(this.container);
+    this.currentScreen.onBack(() => {
+      this.showDashboard();
+    });
+    this.currentScreen.onServerJoin((server) => {
+      this.startGame();
+    });
+  }
 
-// Lighting
-const light = new THREE.HemisphereLight(0xffffff, 0x666666, 2);
-scene.add(light);
+  async startGame() {
+    this.cleanupCurrentScreen();
+    
+    this.game = new Game(this.container);
+    await this.game.start();
+    
+    this.game.onLeave(() => {
+      this.showDashboard();
+    });
+  }
 
-// Ground
-const ground = new THREE.Mesh(
-  new THREE.BoxGeometry(40, 1, 40),
-  new THREE.MeshStandardMaterial({ color: 0x3f7d20 })
-);
-ground.position.y = -0.5;
-scene.add(ground);
-
-// Starter Plot
-const plot = new THREE.Mesh(
-  new THREE.BoxGeometry(10, 0.2, 10),
-  new THREE.MeshStandardMaterial({ color: 0x777777 })
-);
-plot.position.y = 0.1;
-scene.add(plot);
-
-// Placeholder Generator
-const generator = new THREE.Mesh(
-  new THREE.BoxGeometry(1.5, 2, 1.5),
-  new THREE.MeshStandardMaterial({ color: 0xffd700 })
-);
-generator.position.set(0, 1, 0);
-scene.add(generator);
-
-function animate() {
-  requestAnimationFrame(animate);
-
-  generator.rotation.y += 0.01;
-
-  renderer.render(scene, camera);
+  cleanupCurrentScreen() {
+    if (this.currentScreen) {
+      this.currentScreen.destroy();
+      this.currentScreen = null;
+    }
+    
+    if (this.game) {
+      this.game.stop();
+      this.game = null;
+    }
+  }
 }
 
-animate();
-
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+// Start the app
+const app = new App();
