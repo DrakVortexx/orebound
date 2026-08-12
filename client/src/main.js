@@ -28,6 +28,13 @@ class App {
     this.cleanupCurrentScreen();
     
     this.currentScreen = new AuthScreen(this.container);
+    
+    // Check if auth was skipped (user already has token)
+    if (this.currentScreen.isAuthSkipped) {
+      this.showDashboard();
+      return;
+    }
+    
     this.currentScreen.onAuthSuccess(() => {
       this.showDashboard();
     });

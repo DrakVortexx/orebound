@@ -6,6 +6,7 @@ export class AuthScreen {
     this.container = container;
     this.currentMode = 'login'; // 'login' or 'signup'
     this.isAuthSkipped = false;
+    this.onAuthSuccess = null;
     
     // Check if user is already authenticated
     const existingToken = localStorage.getItem('authToken');
@@ -14,7 +15,9 @@ export class AuthScreen {
       this.isAuthSkipped = true;
       // Skip auth screen and go to dashboard
       gameState.currentScreen = 'dashboard';
-      this.onAuthSuccess?.();
+      // Try to fetch user data
+      this.fetchUserData();
+      // Don't call callback here - let parent handle it
       return;
     }
     
@@ -186,6 +189,24 @@ export class AuthScreen {
 
   onAuthSuccess(callback) {
     this.onAuthSuccess = callback;
+  }
+
+  async fetchUserData() {
+    try {
+      const userData = await api.getUserData();
+      if (userData) {
+        gameState.setUser({
+          username: userData.username,
+          id: userData.id
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch user data:', error);
+      // If token is invalid, clear it and show auth screen
+      api.clearToken();
+      this.isAuthSkipped = false;
+      this.render();
+    }
   }
 
   destroy() {
