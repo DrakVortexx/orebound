@@ -158,7 +158,6 @@ export class TutorialSystem {
           <p>${step.description}</p>
         </div>
         <div class="tutorial-footer">
-          <button class="tutorial-btn tutorial-btn-secondary" id="skipBtn">Skip Tutorial</button>
           <button class="tutorial-btn tutorial-btn-primary" id="nextBtn">
             ${step.id === this.steps.length ? 'Finish' : 'Next'}
           </button>
@@ -172,20 +171,12 @@ export class TutorialSystem {
     tutorial.querySelector('#nextBtn').addEventListener('click', () => {
       this.nextStep();
     });
-
-    tutorial.querySelector('#skipBtn').addEventListener('click', () => {
-      this.skip();
-    });
   }
 
   nextStep() {
     this.currentStep++;
     gameState.updateTutorialStep(this.currentStep);
     this.showStep(this.currentStep);
-  }
-
-  skip() {
-    this.complete();
   }
 
   complete() {

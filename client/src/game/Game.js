@@ -21,44 +21,69 @@ export class Game {
   async start() {
     if (this.isRunning) return;
 
-    // Initialize game engine
-    gameEngine.init(this.container);
+    try {
+      // Clear container first
+      this.container.innerHTML = '';
+      this.container.style.width = '100%';
+      this.container.style.height = '100%';
+      this.container.style.position = 'fixed';
+      this.container.style.top = '0';
+      this.container.style.left = '0';
+      this.container.style.background = '#232527';
+      
+      // Initialize game engine
+      gameEngine.init(this.container);
 
-    // Create game world
-    this.createWorld();
+      // Create game world
+      this.createWorld();
 
-    // Initialize player controller
-    this.playerController = new PlayerController(gameEngine.camera, gameEngine.scene);
-    this.playerController.setPosition(0, 2, 5);
+      // Initialize player controller
+      this.playerController = new PlayerController(gameEngine.camera, gameEngine.scene);
+      this.playerController.setPosition(0, 2, 5);
 
-    // Initialize mobile controls
-    this.mobileControls = new MobileControls(this.playerController);
+      // Initialize mobile controls
+      this.mobileControls = new MobileControls(this.playerController);
 
-    // Initialize game UI
-    this.gameUI = new GameUI(this.container);
-    this.gameUI.show();
-    // Listen for game leave events
-    window.addEventListener('gameLeave', () => {
-      this.leaveServer();
-    });
+      // Initialize game UI
+      this.gameUI = new GameUI(this.container);
+      this.gameUI.show();
+      
+      // Listen for game leave events
+      window.addEventListener('gameLeave', () => {
+        this.leaveServer();
+      });
 
-    // Setup player controller callbacks
-    this.setupPlayerCallbacks();
+      // Setup player controller callbacks
+      this.setupPlayerCallbacks();
 
-    // Connect to server
-    await this.connectToServer();
+      // Connect to server
+      await this.connectToServer();
 
-    // Start game loop
-    this.isRunning = true;
-    this.lastTime = performance.now();
-    this.gameLoop(performance.now());
+      // Start game loop
+      this.isRunning = true;
+      this.lastTime = performance.now();
+      this.gameLoop(performance.now());
 
-    // Start generator payouts
-    this.startGeneratorPayouts();
+      // Start generator payouts
+      this.startGeneratorPayouts();
 
-    // Show tutorial if needed
-    if (!gameState.tutorialCompleted) {
-      this.startTutorial();
+      // Show tutorial if needed
+      // Temporarily disabled to fix white screen issues
+      // Tutorial will be fixed and re-enabled later
+      if (!gameState.tutorialCompleted) {
+        gameState.tutorialCompleted = true; // Skip tutorial for now
+      }
+    } catch (error) {
+      console.error('Game start error:', error);
+      this.container.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100vh; color: white; font-family: sans-serif; background: #232527;">
+          <div style="text-align: center;">
+            <h2>Failed to start game</h2>
+            <p>${error.message}</p>
+            <button onclick="location.reload()" style="padding: 10px 20px; background: #00a2ff; border: none; color: white; cursor: pointer; border-radius: 4px;">Retry</button>
+          </div>
+        </div>
+      `;
     }
   }
 
