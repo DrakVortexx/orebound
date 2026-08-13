@@ -155,5 +155,10 @@ export class LeaderboardScreen {
   destroy() {
     this.container.innerHTML = '';
     this.container.style.background = '';
+    this.container.style.position = '';
+    this.container.style.top = '';
+    this.container.style.left = '';
+    this.container.style.width = '';
+    this.container.style.height = '';
   }
 }

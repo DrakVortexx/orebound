@@ -3,6 +3,7 @@ import { DashboardScreen } from './ui/dashboard/DashboardScreen.js';
 import { ServerSelectScreen } from './ui/servers/ServerSelectScreen.js';
 import { Game } from './game/Game.js';
 import { gameState } from './game/GameState.js';
+import { router } from './router.js';
 import './ui/auth/auth.css';
 import './ui/dashboard/dashboard.css';
 import './ui/servers/server-select.css';
@@ -21,29 +22,34 @@ class App {
   }
 
   init() {
+    // Set up router callback
+    router.setNavigateCallback((screen, updateHistory) => {
+      this.navigateToScreen(screen, updateHistory);
+    });
+    
     // Listen for auth success events
     window.addEventListener('authSuccess', (e) => {
-      this.showDashboard();
+      this.navigateToScreen('dashboard');
     });
     
     // Listen for play click events
     window.addEventListener('playClick', () => {
-      this.showServerSelect();
+      this.navigateToScreen('servers');
     });
     
     // Listen for logout events
     window.addEventListener('logout', () => {
-      this.showAuthScreen();
+      this.navigateToScreen('auth');
     });
     
     // Listen for server back events
     window.addEventListener('serverBack', () => {
-      this.showDashboard();
+      this.navigateToScreen('dashboard');
     });
     
     // Listen for server join events
     window.addEventListener('serverJoin', (e) => {
-      this.startGame();
+      this.navigateToScreen('game');
     });
     
     // Listen for leaderboard back events
@@ -52,13 +58,13 @@ class App {
         this.currentScreen.closeLeaderboard();
       } else {
         // If somehow not on dashboard, go back to dashboard
-        this.showDashboard();
+        this.navigateToScreen('dashboard');
       }
     });
     
     // Listen for game leave events
     window.addEventListener('gameLeave', () => {
-      this.showDashboard();
+      this.navigateToScreen('dashboard');
     });
     
     // Listen for shop back events
@@ -69,13 +75,45 @@ class App {
       }
     });
     
-    this.showAuthScreen();
+    // Listen for shop transaction events
+    window.addEventListener('shopTransaction', (e) => {
+      if (e.detail.success) {
+        // Update game state based on transaction
+        // This could trigger UI updates
+      }
+    });
+    
+    // Start with current route
+    const initialScreen = router.getCurrentScreen();
+    this.navigateToScreen(initialScreen, false);
+  }
+
+  navigateToScreen(screen, updateHistory = true) {
+    router.navigate(screen, updateHistory);
+    
+    switch(screen) {
+      case 'auth':
+        this.showAuthScreen();
+        break;
+      case 'dashboard':
+        this.showDashboard();
+        break;
+      case 'servers':
+        this.showServerSelect();
+        break;
+      case 'game':
+        this.startGame();
+        break;
+      default:
+        this.showAuthScreen();
+    }
   }
 
   showAuthScreen() {
     this.cleanupCurrentScreen();
     
     this.currentScreen = new AuthScreen(this.container);
+    router.navigate('auth');
     
     // Check if user is already authenticated
     if (this.currentScreen.isAuthenticated) {
@@ -88,18 +126,14 @@ class App {
     this.cleanupCurrentScreen();
     
     this.currentScreen = new DashboardScreen(this.container);
+    router.navigate('dashboard');
   }
 
   showServerSelect() {
     this.cleanupCurrentScreen();
     
     this.currentScreen = new ServerSelectScreen(this.container);
-    this.currentScreen.onBack(() => {
-      this.showDashboard();
-    });
-    this.currentScreen.onServerJoin((server) => {
-      this.startGame();
-    });
+    router.navigate('servers');
   }
 
   async startGame() {

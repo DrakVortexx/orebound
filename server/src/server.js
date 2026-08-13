@@ -22,6 +22,23 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api", gameRoutes);
 
+// Serve static files for client-side routing
+app.use(express.static('../client/dist'));
+
+// Handle client-side routing - serve index.html for all non-API routes
+app.get('*', (req, res) => {
+  // Don't handle API routes
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({
+      ok: false,
+      error: "Endpoint not found"
+    });
+  }
+  
+  // Serve index.html for all other routes
+  res.sendFile('../client/dist/index.html', { root: __dirname });
+});
+
 /*
  * Health check
  */

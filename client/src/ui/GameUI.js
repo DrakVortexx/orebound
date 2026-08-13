@@ -211,17 +211,9 @@ export class GameUI {
   toggleShop() {
     if (!this.shopScreen) {
       this.shopScreen = new ShopScreen(this.container);
-      this.shopScreen.onBack(() => {
-        this.shopScreen.destroy();
-        this.shopScreen = null;
-      });
-      this.shopScreen.onTransaction((result) => {
-        if (result.success) {
-          this.showNotification(result.message, 'success');
-          this.updateMoney(gameState.money);
-          this.updateInventory();
-        }
-      });
+    } else {
+      this.shopScreen.destroy();
+      this.shopScreen = null;
     }
   }
 

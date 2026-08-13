@@ -5,6 +5,7 @@ export class TutorialSystem {
   constructor() {
     this.currentStep = 0;
     this.isActive = false;
+    this.container = document.body;
     this.steps = this.getTutorialSteps();
   }
 
@@ -195,6 +196,7 @@ export class TutorialSystem {
   }
 
   removeTutorial() {
+    if (!this.container) return;
     const existing = this.container.querySelector('.tutorial-overlay');
     if (existing) {
       existing.remove();
