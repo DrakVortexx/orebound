@@ -4,8 +4,12 @@ import { MobileControls } from './player/MobileControls.js';
 import { GameUI } from '../ui/GameUI.js';
 import { gameState } from './GameState.js';
 import { ORE_TYPES, GAME_CONFIG } from './GameConfig.js';
+import { ORE_TYPES as OREBOUND_ORES, MINING_AREAS, GAME_CONFIG as OREBOUND_CONFIG, getRankByKey } from './OreboundConfig.js';
 import { api } from '../networking/API.js';
 import { tutorialSystem } from '../ui/tutorial/TutorialSystem.js';
+import { LuckyBlockSystem } from './luckyblocks/LuckyBlockSystem.js';
+import { CreatureSystem } from './creatures/CreatureSystem.js';
+import { BlueMoonSystem } from './events/BlueMoonSystem.js';
 import '../ui/tutorial/tutorial.css';
 import './player/mobile-controls.css';
 
@@ -16,6 +20,11 @@ export class Game {
     this.lastTime = 0;
     this.ores = new Map();
     this.payoutInterval = null;
+    
+    // OREBOUND systems
+    this.luckyBlockSystem = null;
+    this.creatureSystem = null;
+    this.blueMoonSystem = null;
   }
 
   async start() {
@@ -34,12 +43,18 @@ export class Game {
       // Initialize game engine
       gameEngine.init(this.container);
 
+      // Initialize OREBOUND systems
+      this.luckyBlockSystem = new LuckyBlockSystem(gameEngine);
+      this.creatureSystem = new CreatureSystem(gameEngine);
+      this.blueMoonSystem = new BlueMoonSystem(gameEngine);
+      this.blueMoonSystem.init();
+
       // Create game world
       this.createWorld();
 
       // Initialize player controller
       this.playerController = new PlayerController(gameEngine.camera, gameEngine.scene);
-      this.playerController.setPosition(0, 2, 5);
+      this.playerController.setPosition(0, 1.65, 11);
 
       // Initialize mobile controls
       this.mobileControls = new MobileControls(this.playerController);
@@ -64,8 +79,8 @@ export class Game {
       this.lastTime = performance.now();
       this.gameLoop(performance.now());
 
-      // Start generator payouts
-      this.startGeneratorPayouts();
+      // Start creature income payouts
+      this.startCreaturePayouts();
 
       // Show tutorial if needed
       // Temporarily disabled to fix white screen issues
@@ -88,54 +103,80 @@ export class Game {
   }
 
   createWorld() {
-    // Create player plot
-    gameEngine.createPlayerPlot(gameState.plot.maxX);
-
     // Create shop
     gameEngine.createShop();
 
-    // Create crate area
-    gameEngine.createCrateArea();
-
-    // Spawn initial ores
+    // Spawn initial ores using OREBOUND mining areas
     this.spawnOres();
 
-    // Place existing generators
-    gameState.placedGenerators.forEach(gen => {
-      const generator = gameEngine.createGenerator(gen.generatorType, gen.position);
-      this.ores.set(gen.id, generator);
-    });
+    // Initialize Lucky Block inventory from game state
+    if (gameState.luckyBlocks) {
+      this.luckyBlockSystem.updateInventory(gameState.luckyBlocks);
+    } else {
+      // Set starting inventory
+      this.luckyBlockSystem.addLuckyBlock('basic', OREBOUND_CONFIG.STARTING_LUCKY_BLOCKS.basic);
+    }
+
+    // Initialize creatures from game state
+    if (gameState.creatures) {
+      gameState.creatures.forEach(creatureData => {
+        const creature = this.creatureSystem.generateCreature(creatureData.rankKey);
+        creature.id = creatureData.id;
+        creature.name = creatureData.name;
+        this.creatureSystem.addCreatureToCollection(creature);
+        
+        // Create mesh and place on pedestal if assigned
+        if (creatureData.pedestalId !== undefined) {
+          const pedestal = gameEngine.pedestals[creatureData.pedestalId];
+          if (pedestal) {
+            this.creatureSystem.placeCreatureOnPedestal(creature, pedestal);
+          }
+        }
+      });
+    }
   }
 
   spawnOres() {
-    const miningArea = { x: -40, z: -40, size: 80 };
-    const oreCount = 50;
+    // Spawn ores in each mining area
+    MINING_AREAS.forEach(area => {
+      const oreCount = 30;
+      
+      for (let i = 0; i < oreCount; i++) {
+        const oreType = this.getRandomOreType(area.resources);
+        const position = {
+          x: area.position.x + (Math.random() - 0.5) * 50,
+          y: 1,
+          z: area.position.z + (Math.random() - 0.5) * 50
+        };
 
-    for (let i = 0; i < oreCount; i++) {
-      const oreType = this.getRandomOreType();
-      const position = {
-        x: miningArea.x + (Math.random() - 0.5) * miningArea.size,
-        y: 1,
-        z: miningArea.z + (Math.random() - 0.5) * miningArea.size
-      };
-
-      const ore = gameEngine.createOre(oreType, position);
-      this.ores.set(ore.uuid, ore);
-    }
+        const ore = gameEngine.createOre(oreType, position);
+        this.ores.set(ore.userData.uuid, ore);
+      }
+    });
   }
 
-  getRandomOreType() {
+  getRandomOreType(availableResources) {
+    const resources = availableResources || Object.keys(OREBOUND_ORES);
     const rand = Math.random();
     let cumulative = 0;
-
-    for (const [key, oreType] of Object.entries(ORE_TYPES)) {
-      cumulative += oreType.spawnFrequency;
-      if (rand <= cumulative) {
-        return oreType;
+    
+    // Calculate total spawn frequency for available resources
+    let totalFrequency = 0;
+    resources.forEach(key => {
+      totalFrequency += OREBOUND_ORES[key].spawnFrequency;
+    });
+    
+    // Normalize and select
+    let normalizedRand = rand;
+    for (const key of resources) {
+      const normalizedFreq = OREBOUND_ORES[key].spawnFrequency / totalFrequency;
+      cumulative += normalizedFreq;
+      if (normalizedRand <= cumulative) {
+        return OREBOUND_ORES[key];
       }
     }
 
-    return ORE_TYPES.STONE;
+    return OREBOUND_ORES.STONE;
   }
 
   setupPlayerCallbacks() {
@@ -145,14 +186,16 @@ export class Game {
     };
 
     this.playerController.onInteractionStart = (target) => {
-      if (target.userData.type === 'generator') {
-        this.gameUI.showProgressBar(GAME_CONFIG.STEALING_HOLD_TIME);
+      if (target.userData.type === 'plot') {
+        this.handlePlotInteraction(target);
+      } else if (target.userData.type === 'pedestal') {
+        this.handlePedestalInteraction(target);
       }
     };
 
     this.playerController.onInteractionComplete = (target) => {
-      if (target.userData.type === 'generator') {
-        this.handleGeneratorInteraction(target);
+      if (target.userData.type === 'pedestal') {
+        this.handlePedestalComplete(target);
       }
     };
 
@@ -161,36 +204,87 @@ export class Game {
     };
   }
 
-  handleGeneratorInteraction(generator) {
-    const genData = generator.userData;
-    
-    if (genData.isOwned) {
-      // Pick up own generator
-      this.pickupGenerator(generator);
-    } else {
-      // Steal generator
-      this.stealGenerator(generator);
+  handlePlotInteraction(plot) {
+    if (plot.userData.stage === 0) {
+      // Empty plot - try to plant seed
+      if (this.luckyBlockSystem.getTotalLuckyBlocks() > 0) {
+        const selected = this.luckyBlockSystem.getSelectedBlock();
+        if (this.luckyBlockSystem.plantSeed(plot, getRankByKey(selected.rankKey))) {
+          this.gameUI.showNotification('Seed planted!', 'success');
+        } else {
+          this.gameUI.showNotification('No seeds available', 'error');
+        }
+      } else {
+        this.gameUI.showNotification('No seeds to plant', 'error');
+      }
+    } else if (plot.userData.stage === 2) {
+      // Ready to harvest
+      const reward = this.luckyBlockSystem.harvestPlot(plot);
+      if (reward) {
+        this.gameUI.showNotification(`Harvested ${reward.rank.label} Lucky Block!`, 'success');
+        this.gameUI.updateInventory();
+      }
     }
   }
 
-  pickupGenerator(generator) {
-    const genData = generator.userData;
-    gameState.removePlacedGenerator(genData.id);
-    gameEngine.scene.remove(generator);
-    this.gameUI.showNotification('Generator picked up', 'info');
+  handlePedestalInteraction(pedestal) {
+    if (pedestal.userData.creatureId) {
+      // Creature on pedestal - sell it
+      const creature = this.creatureSystem.getCreatureById(pedestal.userData.creatureId);
+      if (creature) {
+        const sellValue = this.calculateCreatureSellValue(creature);
+        gameState.addMoney(sellValue);
+        this.creatureSystem.removeCreatureFromCollection(creature.id);
+        this.creatureSystem.removeCreatureFromPedestal(pedestal);
+        this.gameUI.showNotification(`Sold ${creature.name} for $${sellValue}`, 'success');
+        this.gameUI.updateMoney(gameState.money);
+      }
+    } else if (pedestal.userData.hasBlock) {
+      // Lucky Block on pedestal - start opening
+      this.gameUI.showProgressBar(3000); // 3 second opening
+    } else {
+      // Empty pedestal - try to place Lucky Block
+      const selected = this.luckyBlockSystem.getSelectedBlock();
+      if (this.luckyBlockSystem.getTotalLuckyBlocks() > 0) {
+        if (this.luckyBlockSystem.placeLuckyBlock(pedestal, selected.rankKey, selected.mutation, selected.trait)) {
+          this.gameUI.showNotification('Lucky Block placed!', 'success');
+        } else {
+          this.gameUI.showNotification('Failed to place block', 'error');
+        }
+      } else {
+        this.gameUI.showNotification('No Lucky Blocks to place', 'error');
+      }
+    }
   }
 
-  stealGenerator(generator) {
-    const genData = generator.userData;
-    
-    // Remove from current owner
-    gameEngine.scene.remove(generator);
-    
-    // Add to player's inventory
-    gameState.addGenerator(genData.generatorType);
-    
-    this.gameUI.showNotification(`Stole ${genData.generatorType.name}!`, 'warning');
-    this.gameUI.updateInventory();
+  handlePedestalComplete(pedestal) {
+    if (pedestal.userData.hasBlock && !pedestal.userData.creatureId) {
+      const reward = this.luckyBlockSystem.openLuckyBlock(pedestal);
+      if (reward) {
+        // Handle creature reward
+        const creatureReward = reward.find(r => r.type === 'creature');
+        if (creatureReward) {
+          const creature = this.creatureSystem.generateCreature(creatureReward.rankKey);
+          this.creatureSystem.addCreatureToCollection(creature);
+          this.creatureSystem.placeCreatureOnPedestal(creature, pedestal);
+          this.gameUI.showNotification(`Discovered ${creature.name}!`, 'success');
+        }
+        
+        // Handle other rewards
+        const moneyReward = reward.find(r => r.type === 'money');
+        if (moneyReward) {
+          this.gameUI.showNotification(`+$${moneyReward.amount}`, 'success');
+          this.gameUI.updateMoney(gameState.money);
+        }
+        
+        this.gameUI.updateInventory();
+      }
+    }
+  }
+
+  calculateCreatureSellValue(creature) {
+    const rank = getRankByKey(creature.rankKey);
+    return Math.floor(rank.min * 0.5 + creature.incomePerSec * 100);
   }
 
   async connectToServer() {
@@ -204,6 +298,9 @@ export class Game {
       api.onWebSocketMessage((message) => {
         this.handleServerMessage(message);
       });
+      
+      // Store WebSocket reference
+      gameState.websocket = api.websocket;
 
     } catch (error) {
       console.error('Failed to connect to server:', error);
@@ -254,20 +351,30 @@ export class Game {
     }
   }
 
-  startGeneratorPayouts() {
+  startCreaturePayouts() {
     this.payoutInterval = setInterval(() => {
-      let totalIncome = 0;
-
-      gameState.placedGenerators.forEach(gen => {
-        const generatorType = gen.generatorType;
-        const income = generatorType.incomeRate / 1000; // Per ms to per second
-        totalIncome += income;
-      });
-
+      // Update Blue Moon system
+      this.blueMoonSystem.update(1);
+      
+      // Update creatures
+      this.creatureSystem.updateCreatures(1);
+      
+      // Calculate creature income
+      let totalIncome = this.creatureSystem.getTotalIncome();
+      
+      // Apply Blue Moon bonus if active
+      if (this.blueMoonSystem.isActive) {
+        totalIncome = this.blueMoonSystem.getModifiedReward(totalIncome);
+      }
+      
       if (totalIncome > 0) {
         gameState.addMoney(totalIncome);
         this.gameUI.updateMoney(gameState.money);
       }
+      
+      // Update game state with current systems
+      gameState.luckyBlocks = this.luckyBlockSystem.getInventory();
+      gameState.creatures = this.creatureSystem.getAllCreatures();
     }, GAME_CONFIG.PAYOUT_INTERVAL);
   }
 
@@ -286,6 +393,16 @@ export class Game {
       this.playerController.update(delta);
     }
 
+    // Update Blue Moon system
+    if (this.blueMoonSystem) {
+      this.blueMoonSystem.update(delta);
+    }
+
+    // Update creatures
+    if (this.creatureSystem) {
+      this.creatureSystem.updateCreatures(delta);
+    }
+
     // Update interaction prompts
     this.updateInteractionPrompts();
 
@@ -302,10 +419,24 @@ export class Game {
 
       if (target.userData.type === 'ore') {
         promptText = 'Mine (Click)';
-      } else if (target.userData.type === 'generator') {
-        promptText = target.userData.isOwned ? 'Pick Up' : 'Steal';
-      } else if (target.userData.type === 'crate') {
-        promptText = 'Open';
+      } else if (target.userData.type === 'plot') {
+        if (target.userData.stage === 0) {
+          promptText = '[E] Plant Seed';
+        } else if (target.userData.stage === 1) {
+          promptText = 'Growing...';
+        } else if (target.userData.stage === 2) {
+          promptText = '[E] Harvest Lucky Block';
+        }
+      } else if (target.userData.type === 'pedestal') {
+        if (target.userData.creatureId) {
+          promptText = '[E] Sell Creature';
+        } else if (target.userData.hasBlock) {
+          promptText = '[F] Open Lucky Block | [E] Store';
+        } else {
+          promptText = '[E] Place Lucky Block';
+        }
+      } else if (target.userData.type === 'luckyBlock') {
+        promptText = 'Lucky Block';
       }
 
       this.gameUI.showInteractionPrompt(promptText);
@@ -339,7 +470,6 @@ export class Game {
 
   stop() {
     this.isRunning = false;
-    this.isRunning = false;
 
     if (this.payoutInterval) {
       clearInterval(this.payoutInterval);
@@ -347,6 +477,14 @@ export class Game {
 
     if (this.playerController) {
       this.playerController.dispose();
+    }
+    
+    if (this.creatureSystem) {
+      this.creatureSystem.cleanup();
+    }
+    
+    if (this.blueMoonSystem) {
+      this.blueMoonSystem.cleanup();
     }
 
     if (this.mobileControls) {

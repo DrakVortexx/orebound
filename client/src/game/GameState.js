@@ -19,6 +19,36 @@ export class GameState {
     this.inGame = false;
     this.playerPosition = { x: 0, y: 0, z: 0 };
     this.otherPlayers = new Map();
+    
+    // OREBOUND-specific properties
+    this.luckyBlocks = {
+      normal: this.createEmptyRankInventory(),
+      bluemoon: this.createEmptyRankInventory(),
+      soulbound: this.createEmptyRankInventory()
+    };
+    this.creatures = [];
+    this.selectedBlock = {
+      rankKey: 'basic',
+      mutation: 'normal',
+      trait: 'none'
+    };
+    this.websocket = null;
+  }
+
+  createEmptyRankInventory() {
+    return {
+      basic: 0,
+      common: 0,
+      uncommon: 0,
+      rare: 0,
+      epic: 0,
+      legendary: 0,
+      mythic: 0,
+      godly: 0,
+      secret: 0,
+      transcendent: 0,
+      omniversal: 0
+    };
   }
 
   setUser(user) {
@@ -106,6 +136,33 @@ export class GameState {
     }
   }
 
+  addCreature(rankKey) {
+    const creature = {
+      id: Math.random().toString(36).substr(2, 9),
+      rankKey: rankKey,
+      pedestalId: null,
+      obtainedAt: Date.now()
+    };
+    this.creatures.push(creature);
+    return creature;
+  }
+
+  removeCreature(creatureId) {
+    const index = this.creatures.findIndex(c => c.id === creatureId);
+    if (index !== -1) {
+      return this.creatures.splice(index, 1)[0];
+    }
+    return null;
+  }
+
+  addResources(amount) {
+    // Generic resource addition for OREBOUND
+    if (!this.inventory.resources) {
+      this.inventory.resources = 0;
+    }
+    this.inventory.resources += amount;
+  }
+
   reset() {
     this.currentScreen = 'auth';
     this.isAuthenticated = false;
@@ -126,6 +183,24 @@ export class GameState {
     this.inGame = false;
     this.playerPosition = { x: 0, y: 0, z: 0 };
     this.otherPlayers.clear();
+    
+    // Reset OREBOUND properties
+    this.luckyBlocks = {
+      normal: this.createEmptyRankInventory(),
+      bluemoon: this.createEmptyRankInventory(),
+      soulbound: this.createEmptyRankInventory()
+    };
+    this.creatures = [];
+    this.selectedBlock = {
+      rankKey: 'basic',
+      mutation: 'normal',
+      trait: 'none'
+    };
+    
+    if (this.websocket) {
+      this.websocket.close();
+      this.websocket = null;
+    }
   }
 }
 

@@ -6,29 +6,38 @@ export class PlayerController {
     this.camera = camera;
     this.scene = scene;
     
-    this.moveSpeed = 10;
-    this.jumpForce = 8;
-    this.gravity = 20;
+    // Player state - based on example game
+    this.pos = new THREE.Vector3(0, 1.65, 11);
+    this.yaw = 0;
+    this.pitch = -0.15;
+    this.speed = 8.2;
+    this.radius = 0.45;
+    this.velY = 0;
+    this.onGround = true;
+    this.pointerLocked = false;
     
-    this.velocity = new THREE.Vector3();
-    this.direction = new THREE.Vector3();
+    // Movement state
+    this.keys = new Set();
+    this.mobileInput = { enabled: false, moveX: 0, moveY: 0 };
     
-    this.moveForward = false;
-    this.moveBackward = false;
-    this.moveLeft = false;
-    this.moveRight = false;
-    this.canJump = false;
+    // Physics constants - from example game
+    this.groundY = 1.65;
+    this.gravity = 17.5;
+    this.jumpVelocity = 7.8;
     
-    this.isGrounded = true;
-    this.playerHeight = 2;
-    
+    // Interaction system
     this.raycaster = new THREE.Raycaster();
     this.interactionDistance = 5;
-    
     this.currentTarget = null;
     this.isInteracting = false;
     this.interactionStartTime = 0;
     this.interactionDuration = 1000;
+    
+    // Camera mode
+    this.cameraMode = 'first'; // 'first' or 'third-back'
+    
+    // Stun state
+    this.stunUntil = 0;
     
     this.setupControls();
   }
@@ -38,66 +47,49 @@ export class PlayerController {
     document.addEventListener('keyup', (event) => this.onKeyUp(event));
     document.addEventListener('mousedown', (event) => this.onMouseDown(event));
     document.addEventListener('mouseup', (event) => this.onMouseUp(event));
+    document.addEventListener('pointerlockchange', () => this.onPointerLockChange());
+    
+    // Camera controls
+    document.addEventListener('mousemove', (event) => this.onMouseMove(event));
   }
 
   onKeyDown(event) {
-    switch (event.code) {
-      case 'KeyW':
-      case 'ArrowUp':
-        this.moveForward = true;
-        break;
-      case 'KeyS':
-      case 'ArrowDown':
-        this.moveBackward = true;
-        break;
-      case 'KeyA':
-      case 'ArrowLeft':
-        this.moveLeft = true;
-        break;
-      case 'KeyD':
-      case 'ArrowRight':
-        this.moveRight = true;
-        break;
-      case 'Space':
-        if (this.canJump) {
-          this.velocity.y = this.jumpForce;
-          this.canJump = false;
-          this.isGrounded = false;
-        }
-        break;
-      case 'KeyE':
-        this.startInteraction();
-        break;
+    this.keys.add(event.code);
+    
+    if (event.code === 'Space' && this.onGround) {
+      this.velY = this.jumpVelocity;
+      this.onGround = false;
+    }
+    
+    if (event.code === 'KeyE') {
+      this.startInteraction();
+    }
+    
+    if (event.code === 'KeyF') {
+      this.openLuckyBlock();
+    }
+    
+    // Toggle camera mode with V
+    if (event.code === 'KeyV') {
+      this.cameraMode = this.cameraMode === 'first' ? 'third-back' : 'first';
     }
   }
 
   onKeyUp(event) {
-    switch (event.code) {
-      case 'KeyW':
-      case 'ArrowUp':
-        this.moveForward = false;
-        break;
-      case 'KeyS':
-      case 'ArrowDown':
-        this.moveBackward = false;
-        break;
-      case 'KeyA':
-      case 'ArrowLeft':
-        this.moveLeft = false;
-        break;
-      case 'KeyD':
-      case 'ArrowRight':
-        this.moveRight = false;
-        break;
-      case 'KeyE':
-        this.cancelInteraction();
-        break;
+    this.keys.delete(event.code);
+    
+    if (event.code === 'KeyE') {
+      this.cancelInteraction();
     }
   }
 
   onMouseDown(event) {
     if (event.button === 0) { // Left click
-      this.tryMine();
+      if (!this.pointerLocked) {
+        this.camera.element?.requestPointerLock();
+      } else {
+        this.tryMine();
+      }
     }
   }
 
@@ -105,6 +97,21 @@ export class PlayerController {
     if (event.button === 0) {
       this.stopMining();
     }
+  }
+
+  onMouseMove(event) {
+    if (!this.pointerLocked) return;
+    
+    const sensitivity = 0.002;
+    this.yaw -= event.movementX * sensitivity;
+    this.pitch -= event.movementY * sensitivity;
+    
+    // Clamp pitch
+    this.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.pitch));
+  }
+
+  onPointerLockChange() {
+    this.pointerLocked = document.pointerLockElement === this.camera.element;
   }
 
   startInteraction() {
@@ -150,56 +157,60 @@ export class PlayerController {
   }
 
   update(delta) {
-    // Apply movement
-    this.direction.z = Number(this.moveForward) - Number(this.moveBackward);
-    this.direction.x = Number(this.moveRight) - Number(this.moveLeft);
-    this.direction.normalize();
+    // Check if stunned
+    const now = performance.now() / 1000;
+    if (this.stunUntil > now) return;
+    
+    // Movement - based on example game's movePlayer function
+    const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    const m = new THREE.Vector3();
 
-    // Get camera direction (horizontal only)
-    const cameraDirection = new THREE.Vector3();
-    this.camera.getWorldDirection(cameraDirection);
-    cameraDirection.y = 0;
-    cameraDirection.normalize();
-
-    const cameraRight = new THREE.Vector3();
-    cameraRight.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
-
-    // Calculate movement direction
-    const moveDirection = new THREE.Vector3();
-    moveDirection.addScaledVector(cameraDirection, this.direction.z);
-    moveDirection.addScaledVector(cameraRight, this.direction.x);
-    moveDirection.normalize();
-
-    // Apply movement
-    if (this.direction.z !== 0 || this.direction.x !== 0) {
-      this.velocity.x = moveDirection.x * this.moveSpeed;
-      this.velocity.z = moveDirection.z * this.moveSpeed;
-    } else {
-      this.velocity.x = 0;
-      this.velocity.z = 0;
+    if (this.keys.has("KeyW")) m.sub(fwd);
+    if (this.keys.has("KeyS")) m.add(fwd);
+    if (this.keys.has("ArrowUp")) m.sub(fwd);
+    if (this.keys.has("ArrowDown")) m.add(fwd);
+    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) m.sub(right);
+    if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) m.add(right);
+    
+    // Mobile input
+    if (this.mobileInput.enabled) {
+      m.addScaledVector(right, this.mobileInput.moveX);
+      m.addScaledVector(fwd, this.mobileInput.moveY);
     }
 
-    // Apply gravity
-    this.velocity.y -= this.gravity * delta;
-
-    // Update position
-    this.camera.position.x += this.velocity.x * delta;
-    this.camera.position.y += this.velocity.y * delta;
-    this.camera.position.z += this.velocity.z * delta;
-
-    // Ground collision
-    if (this.camera.position.y < this.playerHeight) {
-      this.camera.position.y = this.playerHeight;
-      this.velocity.y = 0;
-      this.isGrounded = true;
-      this.canJump = true;
+    // Apply movement
+    if (m.lengthSq() > 0) {
+      m.normalize().multiplyScalar(this.speed * delta);
+      this.pos.add(m);
     }
+
+    // Bound player position
+    this.pos.x = Math.max(-160, Math.min(160, this.pos.x));
+    this.pos.z = Math.max(-60, Math.min(60, this.pos.z));
+
+    // Jumping and gravity - from example game
+    if (this.keys.has("Space") && this.onGround) {
+      this.velY = this.jumpVelocity;
+      this.onGround = false;
+    }
+    this.velY -= this.gravity * delta;
+    this.velY *= 0.992;
+    this.pos.y += this.velY * delta;
+    if (this.pos.y <= this.groundY) {
+      this.pos.y = this.groundY;
+      this.velY = 0;
+      this.onGround = true;
+    }
+
+    // Update camera
+    this.updateCamera();
 
     // Update game state position
     gameState.playerPosition = {
-      x: this.camera.position.x,
-      y: this.camera.position.y,
-      z: this.camera.position.z
+      x: this.pos.x,
+      y: this.pos.y,
+      z: this.pos.z
     };
 
     // Check for interactions
@@ -221,6 +232,27 @@ export class PlayerController {
     }
   }
 
+  updateCamera() {
+    // Based on example game's updateCamera function
+    this.camera.rotation.order = "YXZ";
+    this.camera.rotation.y = this.yaw;
+    this.camera.rotation.x = this.pitch;
+    
+    if (this.cameraMode === "third-back") {
+      const back = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(5.2);
+      const height = 2.2;
+      const target = new THREE.Vector3(this.pos.x, this.pos.y + 1.1, this.pos.z);
+      const camPos = new THREE.Vector3(
+        target.x + back.x,
+        target.y + height,
+        target.z + back.z
+      );
+      this.camera.position.copy(camPos);
+    } else {
+      this.camera.position.copy(this.pos);
+    }
+  }
+
   checkForInteractions() {
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
     this.raycaster.far = this.interactionDistance;
@@ -230,14 +262,30 @@ export class PlayerController {
     if (intersects.length > 0) {
       const hit = intersects[0];
       if (hit.object.userData && (hit.object.userData.type === 'ore' || 
-                                   hit.object.userData.type === 'generator' ||
-                                   hit.object.userData.type === 'crate')) {
+                                   hit.object.userData.type === 'luckyBlock' ||
+                                   hit.object.userData.type === 'plot' ||
+                                   hit.object.userData.type === 'pedestal')) {
         this.currentTarget = hit.object;
         return;
       }
     }
 
     this.currentTarget = null;
+  }
+
+  openLuckyBlock() {
+    if (this.currentTarget && this.currentTarget.userData.type === 'pedestal') {
+      const pedestal = this.currentTarget;
+      if (pedestal.userData.hasBlock && !pedestal.userData.creatureId) {
+        this.startLuckyBlockOpen(pedestal);
+      }
+    }
+  }
+
+  startLuckyBlockOpen(pedestal) {
+    // This will be handled by the game's Lucky Block system
+    pedestal.userData.openingUntil = performance.now() / 1000 + 3; // 3 second opening
+    this.onInteractionStart(pedestal);
   }
 
   handleMining(delta) {
@@ -265,8 +313,8 @@ export class PlayerController {
   destroyOre(ore) {
     const oreType = ore.userData.oreType;
     
-    // Add to inventory
-    gameState.addToInventory(oreType.id, 1);
+    // Add to inventory - will be updated for OREBOUND resources
+    gameState.addToInventory(oreType.name, 1);
 
     // Create particles
     this.createMiningParticles(ore.position, oreType.color);
@@ -298,12 +346,13 @@ export class PlayerController {
       });
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
 
     const material = new THREE.PointsMaterial({
       color: color,
       size: 0.15,
-      transparent: true
+      transparent: true,
+      opacity: 1
     });
 
     const particles = new THREE.Points(geometry, material);
@@ -315,12 +364,11 @@ export class PlayerController {
       const positions = particles.geometry.attributes.position.array;
       let alive = false;
 
-      for (let i = 0; i < velocities.length; i++) {
+      for (let i = 0; i < particleCount; i++) {
         positions[i * 3] += velocities[i].x;
         positions[i * 3 + 1] += velocities[i].y;
         positions[i * 3 + 2] += velocities[i].z;
-
-        velocities[i].y -= 0.01;
+        velocities[i].y -= 0.01; // gravity
 
         if (positions[i * 3 + 1] > 0) alive = true;
       }
@@ -329,10 +377,12 @@ export class PlayerController {
       particles.userData.life -= 0.02;
       particles.material.opacity = particles.userData.life;
 
-      if (particles.userData.life > 0) {
+      if (particles.userData.life > 0 && alive) {
         requestAnimationFrame(animateParticles);
       } else {
         this.scene.remove(particles);
+        particles.geometry.dispose();
+        particles.material.dispose();
       }
     };
 
@@ -340,11 +390,11 @@ export class PlayerController {
   }
 
   setPosition(x, y, z) {
-    this.camera.position.set(x, y, z);
+    this.pos.set(x, y, z);
   }
 
   getPosition() {
-    return this.camera.position.clone();
+    return this.pos.clone();
   }
 
   dispose() {
@@ -352,5 +402,7 @@ export class PlayerController {
     document.removeEventListener('keyup', this.onKeyUp);
     document.removeEventListener('mousedown', this.onMouseDown);
     document.removeEventListener('mouseup', this.onMouseUp);
+    document.removeEventListener('mousemove', this.onMouseMove);
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange);
   }
 }
