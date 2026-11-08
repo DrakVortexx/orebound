@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OREBOUND</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --bg2: #111a33;
+    --panel: #16203c;
+    --panel2: #1d2a4d;
+    --border: #2a3a66;
+    --text: #e8eefc;
+    --muted: #8ea0c9;
+    --accent: #38bdf8;
+    --gold: #fbbf24;
+    --green: #34d399;
+    --red: #fb7185;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(1200px 700px at 70% -10%, #1b2a55 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+  }
+  button { font-family: inherit; cursor: pointer; }
+  input { font-family: inherit; }
+
+  /* ---------- Auth screen ---------- */
+  #authScreen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .auth-card {
+    width: 100%;
+    max-width: 400px;
+    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 36px 32px;
+    box-shadow: 0 30px 80px rgba(0,0,0,.5);
+  }
+  .auth-card h1 {
+    font-size: 34px;
+    letter-spacing: 4px;
+    text-align: center;
+    background: linear-gradient(90deg, var(--accent), var(--gold));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 4px;
+  }
+  .auth-card .sub {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 26px;
+  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tabs button {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #06121f; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+  .field input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #0d1526;
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+  }
+  .field input:focus { border-color: var(--accent); }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel2);
+    color: var(--text);
+    font-weight: 600;
+    font-size: 14px;
+    transition: transform .08s ease, filter .15s ease;
+  }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: linear-gradient(90deg, #0ea5e9, #38bdf8); border-color: transparent; color: #04121f; }
+  .btn.gold { background: linear-gradient(90deg, #d97706, #fbbf24); border-color: transparent; color: #241300; }
+  .btn.green { background: linear-gradient(90deg, #059669, #34d399); border-color: transparent; color: #032117; }
+  .btn.danger { background: linear-gradient(90deg, #be123c, #fb7185); border-color: transparent; color: #2b020a; }
+  .btn.block { width: 100%; }
+  .btn.small { padding: 7px 12px; font-size: 12px; border-radius: 8px; }
+  .auth-error {
+    display: none;
+    background: rgba(251,113,133,.12);
+    border: 1px solid rgba(251,113,133,.4);
+    color: var(--red);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .auth-hint { text-align: center; color: var(--muted); font-size: 12px; margin-top: 16px; }
+
+  /* ---------- App shell ---------- */
+  #app { display: none; min-height: 100vh; flex-direction: column; }
+  #app.visible { display: flex; }
+  header.topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 22px;
+    background: rgba(13,21,38,.85);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    flex-wrap: wrap;
+  }
+  .brand { font-weight: 800; letter-spacing: 3px; font-size: 18px; color: var(--accent); }
+  .topstats { display: flex; gap: 14px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .chip {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chip b { color: var(--gold); }
+  .chip.level b { color: var(--accent); }
+  nav.tabs-main { display: flex; gap: 6px; padding: 10px 22px 0; flex-wrap: wrap; }
+  nav.tabs-main button {
+    padding: 9px 16px;
+    border-radius: 10px 10px 0 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 13px;
+  }
+  nav.tabs-main button.active { background: var(--panel); color: var(--text); }
+  main { flex: 1; padding: 22px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .panel-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .grid { display: grid; gap: 14px; }
+  .grid.cols-2 { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .card {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card h3 { font-size: 15px; margin-bottom: 4px; }
+  .card .desc { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+  .card .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+  .tag { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(56,189,248,.15); color: var(--accent); font-weight: 700; }
+  .tag.locked { background: rgba(142,160,201,.15); color: var(--muted); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .stat-box { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .stat-box .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-box .v { font-size: 20px; font-weight: 800; margin-top: 4px; }
+  table.lb { width: 100%; border-collapse: collapse; }
+  table.lb th, table.lb td { padding: 10px 12px; text-align: left; font-size: 14px; border-bottom: 1px solid var(--border); }
+  table.lb th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  table.lb tr.you td { background: rgba(56,189,248,.08); }
+  .rank { font-weight: 800; color: var(--gold); width: 40px; }
+  .muted { color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+
+  /* ---------- Game view ---------- */
+  .game-wrap { max-width: none; padding: 0; }
+  .game-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+  #gameCanvas {
+    width: 100%;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: #0a0f1e;
+    display: block;
+    touch-action: none;
+  }
+  .hud { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .buff-chip { font-size: 12px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel2); }
+  .buff-chip.active { border-color: var(--green); color: var(--green); }
+  .mine-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .mine-picker button {
+    padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel2); color: var(--muted); font-size: 13px; font-weight: 600;
+  }
+  .mine-picker button.active { background: var(--accent); color: #04121f; border-color: transparent; }
+  .controls-hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+  /* ---------- Toasts ---------- */
+  #toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 100; }
+  .toast {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 18px;
+    min-width: 240px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    animation: slidein .2s ease;
+  }
+  .toast.gold { border-left-color: var(--gold); }
+  .toast.red { border-left-color: var(--red); }
+  .toast.green { border-left-color: var(--green); }
+  .toast .t { font-weight: 700; font-size: 14px; }
+  .toast .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  @keyframes slidein { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .xpbar { height: 8px; background: #0d1526; border-radius: 999px; overflow: hidden; margin-top: 6px; }
+  .xpbar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 999px; }
+  .flex { display: flex; align-items: center; gap: 10px; }
+  .ml-auto { margin-left: auto; }
+  .sell-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .sell-row:last-child { border-bottom: none; }
+</style>
+</head>
+<body>
+
+<div id="authScreen">
+  <div class="auth-card">
+    <h1>OREBOUND</h1>
+    <div class="sub">Mine deep. Grow rich. Rule the leaderboard.</div>
+    <div class="tabs">
+      <button id="tabLogin" class="active">Log In</button>
+      <button id="tabSignup">Sign Up</button>
+    </div>
+    <div class="auth-error" id="authError"></div>
+    <form id="authForm" autocomplete="off">
+      <div class="field">
+        <label for="authUsername">Username</label>
+        <input id="authUsername" type="text" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" placeholder="3-24 chars: letters, numbers, _" required>
+      </div>
+      <div class="field">
+        <label for="authPassword">Password</label>
+        <input id="authPassword" type="password" minlength="8" maxlength="128" placeholder="At least 8 characters" required>
+      </div>
+      <button class="btn primary block" id="authSubmit" type="submit">Log In</button>
+    </form>
+    <div class="auth-hint">Progress and wealth are saved to your account across devices.</div>
+  </div>
+</div>
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand">OREBOUND</div>
+    <div class="chip" id="chipName">—</div>
+    <div class="topstats">
+      <div class="chip level">Lv <b id="chipLevel">1</b></div>
+      <div class="chip">Coins <b id="chipCoins">0</b></div>
+      <div class="chip">Wealth <b id="chipWealth">0</b></div>
+    </div>
+  </header>
+  <nav class="tabs-main" id="mainNav">
+    <button data-view="game" class="active">Mine</button>
+    <button data-view="inventory">Inventory</button>
+    <button data-view="shop">Shop</button>
+    <button data-view="leaderboard">Leaderboard</button>
+    <button data-view="stats">Stats</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+  <main id="viewRoot"></main>
+</div>
+
+<div id="toasts"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+'use strict';
+
+/* ============================== helpers ============================== */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const fmt = (n) => Math.floor(Number(n) || 0).toLocaleString('en-US');
+const escapeHtml = (str) => String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hashStr = (str) => { let h = 0; for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
+
+function toast(title, sub = '', tone = '') {
+  const root = $('#toasts');
+  const el = document.createElement('div');
+  el.className = 'toast' + (tone ? ' ' + tone : '');
+  el.innerHTML = `<div class="t">${escapeHtml(title)}</div>${sub ? `<div class="s">${escapeHtml(sub)}</div>` : ''}`;
+  root.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 350); }, 4200);
+}
+
+const ERROR_TEXT = {
+  unauthorized: 'Session expired. Please log in again.',
+  invalid_credentials: 'Wrong username or password.',
+  username_taken: 'That username is already taken.',
+  invalid_username: 'Username must be 3-24 chars: letters, numbers, underscore.',
+  invalid_password: 'Password must be 8-128 characters.',
+  insufficient_coins: 'Not enough coins.',
+  level_too_low: 'Your level is too low for this.',
+  mine_locked: 'That mine is locked.',
+  unknown_pickaxe: 'Unknown pickaxe.',
+  unknown_mine: 'Unknown mine.',
+  unknown_consumable: 'Unknown item.',
+  not_owned: 'You do not own that item.',
+  inventory_empty: 'Nothing to sell there.',
+  inventory_full: 'Inventory is full.',
+  rate_limited: 'Slow down a little.',
+  room_full: 'That mine room is full. Try again shortly.',
+  room_limit: 'Server is busy. Try again later.',
+  profile_missing: 'Profile missing. Try logging in again.',
+  server_error: 'Server error. Try again.'
+};
+function errText(code) { return ERROR_TEXT[code] || 'Something went wrong (' + code + ').'; }
+
+/* ============================== session / api ============================== */
+const LS_SESSION = 'orebound_session_v1';
+let session = null;
+let player = null;
+let config = null;
+let socket = null;
+let socketReady = false;
+
+function saveSession() {
+  if (session) localStorage.setItem(LS_SESSION, JSON.stringify(session));
+  else localStorage.removeItem(LS_SESSION);
+}
+function loadSession() {
+  try { session = JSON.parse(localStorage.getItem(LS_SESSION) || 'null'); } catch { session = null; }
+}
+function clearSession() { session = null; saveSession(); }
+
+function tokenExpired() {
+  return !session || !session.accessToken || Date.now() >= (session.expiresAt || 0);
+}
+
+async function refreshSession() {
+  if (!session || !session.refreshToken) return false;
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: session.refreshToken })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) return false;
+    applySession(data);
+    return true;
+  } catch { return false; }
+}
+
+function applySession(data) {
+  session = {
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken || (session && session.refreshToken),
+    expiresAt: Date.now() + (Number(data.expiresIn) || 3600) * 1000 - 30000
+  };
+  saveSession();
+}
+
+async function getToken() {
+  if (!tokenExpired()) return session.accessToken;
+  if (await refreshSession()) return session.accessToken;
+  logout();
+  return null;
+}
+
+async function api(path, opts = {}, retried = false) {
+  const isAuthRoute = path.indexOf('/api/auth/') === 0;
+  const token = isAuthRoute ? null : await getToken();
+  if (!isAuthRoute && !token) throw new Error('unauthorized');
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !retried && await refreshSession()) {
+    return api(path, opts, true);
+  }
+  if (!res.ok || data.ok === false) {
+    const err = new Error(data.error || 'server_error');
+    err.code = data.error || 'server_error';
+    throw err;
+  }
+  return data;
+}
+
+function logout() {
+  clearSession();
+  if (socket) { try { socket.disconnect(); } catch {} socket = null; }
+  socketReady = false;
+  player = null;
+  leaveRoomLocal();
+  $('#app').classList.remove('visible');
+  $('#authScreen').style.display = 'flex';
+}
+
+/* ============================== socket ============================== */
+function connectSocket() {
+  if (socket) { try { socket.disconnect(); } catch {} }
+  socketReady = false;
+  socket = io({ auth: { token: session.accessToken }, transports: ['websocket', 'polling'] });
+
+  socket.on('connect_error', async (err) => {
+    if (err && /unauthorized|invalid/i.test(String(err.message || ''))) {
+      if (await refreshSession()) connectSocket();
+      else logout();
+    } else {
+      toast('Connection problem', errText('server_error'), 'red');
+    }
+  });
+
+  socket.on('session:ready', (data) => {
+    socketReady = true;
+    player = data.player;
+    if (data.config) config = data.config;
+    bootApp();
+  });
+
+  socket.on('session:replaced', () => {
+    toast('Session replaced', 'You logged in from another device.', 'gold');
+    setTimeout(logout, 1500);
+  });
+
+  socket.on('player:update', (data) => {
+    if (data && data.player) { player = data.player; syncTopbar(); tickBuffs(); }
+  });
+
+  socket.on('achievement:unlocked', (a) => {
+    toast('Achievement: ' + (a.name || a.id), a.reward ? '+' + fmt(a.reward) + ' coins' : '', 'gold');
+    refreshPlayerSoon();
+  });
+
+  socket.on('inventory:full', () => toast('Inventory full', 'Sell some ores to make room.', 'red'));
+
+  // room events
+  socket.on('player:joined', (data) => { if (room && data.player) roomRemoteAdd(data.player); });
+  socket.on('player:left', (data) => { if (room && data.id) room.players.delete(data.id); });
+  socket.on('deposit:broken', (data) => {
+    if (!room || !data.id) return;
+    const d = room.deposits.get(data.id);
+    if (d) { d.active = false; d.progress = 0; d.respawnAt = data.respawnAt || 0; }
+  });
+  socket.on('deposit:respawn', (data) => {
+    if (!room || !data.id) return;
+    room.deposits.set(data.id, { id: data.id, x: data.x, y: data.y, r: data.r, oreId: data.oreId, active: true, progress: 0, respawnAt: 0 });
+  });
+  socket.on('drop:collected', (data) => { if (room && data.dropId) room.drops.delete(data.dropId); });
+  socket.on('drop:removed', (data) => { if (room && data.dropId) room.drops.delete(data.dropId); });
+  socket.on('room:snapshot', (data) => { if (room && data.roomId === room.id) applySnapshot(data); });
+}
+
+let refreshTimer = 0;
+function refreshPlayerSoon() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => {
+    try { const d = await api('/api/me'); if (d.player) { player = d.player; syncTopbar(); if (ui.view !== 'game') renderView(); } } catch {}
+  }, 400);
+}
+
+/* ============================== auth UI ============================== */
+let authMode = 'login';
+
+function showAuthError(msg) {
+  const el = $('#authError');
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  $('#tabLogin').classList.toggle('active', mode === 'login');
+  $('#tabSignup').classList.toggle('active', mode === 'signup');
+  $('#authSubmit').textContent = mode === 'login' ? 'Log In' : 'Create Account';
+  showAuthError('');
+}
+
+async function submitAuth(ev) {
+  ev.preventDefault();
+  const username = $('#authUsername').value.trim();
+  const password = $('#authPassword').value;
+  showAuthError('');
+  $('#authSubmit').disabled = true;
+  try {
+    const data = await api('/api/auth/' + authMode, { method: 'POST', body: { username, password } }, true);
+    applySession(data);
+    connectSocket();
+  } catch (e) {
+    if (e instanceof TypeError) showAuthError('Cannot reach server.');
+    else if (e.message === 'unauthorized') showAuthError('Cannot reach server.');
+    else showAuthError(errText(e.code || e.message));
+  } finally {
+    $('#authSubmit').disabled = false;
+  }
+}
+
+/* ============================== app boot ============================== */
+const ui = { view: 'game', shopTab: 'pickaxes' };
+
+function bootApp() {
+  $('#authScreen').style.display = 'none';
+  $('#app').classList.add('visible');
+  syncTopbar();
+  renderView();
+  maybeAutoJoin();
+}
+
+function syncTopbar() {
+  if (!player) return;
+  $('#chipName').textContent = player.username;
+  $('#chipLevel').textContent = player.level;
+  $('#chipCoins').textContent = fmt(player.coins);
+  $('#chipWealth').textContent = fmt(player.wealth);
+}
+
+function oreById(id) { return (config && config.ores.find(o => o.id === id)) || null; }
+function mineById(id) { return (config && config.mines.find(m => m.id === id)) || null; }
+function pickById(id) { return (config && config.pickaxes.find(p => p.id === id)) || null; }
+function consById(id) { return (config && config.consumables.find(c => c.id === id)) || null; }
+const xpNeeded = (level) => Math.floor(50 * Math.pow(level, 1.5)) + 30;
+const invCount = () => (player ? player.inventory.reduce((a, s) => a + s.qty, 0) : 0);
+
+/* ============================== views ============================== */
+function renderView() {
+  const root = $('#viewRoot');
+  $$('#mainNav button').forEach(b => b.classList.toggle('active', b.dataset.view === ui.view));
+  if (ui.view === 'game') renderGame(root);
+  else if (ui.view === 'inventory') renderInventory(root);
+  else if (ui.view === 'shop') renderShop(root);
+  else if (ui.view === 'leaderboard') renderLeaderboard(root);
+  else if (ui.view === 'stats') renderStats(root);
+  else if (ui.view === 'settings') renderSettings(root);
+}
+
+function renderGame(root) {
+  root.innerHTML = `
+    <div class="panel game-wrap">
+      <div class="game-head">
+        <div>
+          <div class="panel-title" style="margin-bottom:2px">${room ? escapeHtml(room.mine.name) : 'Select a mine'}</div>
+          <div class="muted" style="font-size:12px">${room ? `${room.players.size} miner${room.players.size === 1 ? '' : 's'} underground` : 'Choose an unlocked mine to drop in.'}</div>
+        </div>
+        <div class="ml-auto flex">
+          ${player && !room ? `<button class="btn primary" data-action="join-current">Enter ${escapeHtml(mineById(player.currentMine) ? mineById(player.currentMine).name : 'Mine')}</button>` : ''}
+          ${room ? `<button class="btn danger" data-action="leave-mine">Leave Mine</button>` : ''}
+        </div>
+      </div>
+      <div class="hud" id="buffHud"></div>
+      ${room ? `<canvas id="gameCanvas"></canvas>
+        <div class="controls-hint">WASD / arrows to move &middot; mouse to aim &middot; hold click to mine &middot; E or button to pick up nearby ore &middot; ESC to leave</div>` : `
+        <div class="mine-picker" id="minePicker">
+          ${(config ? config.mines : []).map(m => {
+            const unlocked = player.minesUnlocked.includes(m.id);
+            const isCurrent = player.currentMine === m.id;
+            return `<button class="${isCurrent ? 'active' : ''}" data-action="pick-mine" data-mine="${m.id}" ${unlocked ? '' : 'disabled'}>${escapeHtml(m.name)}${unlocked ? '' : ` · Lv ${m.levelRequired}`}</button>`;
+          }).join('')}
+        </div>
+        <div class="grid cols-3" id="mineCards">
+          ${(config ? config.mines : []).map(m => {
+            const unlocked = player.minesUnlocked.includes(m.id);
+            const isCurrent = player.currentMine === m.id;
+            const canAfford = player.coins >= m.cost && player.level >= m.levelRequired;
+            return `<div class="card">
+              <h3>${escapeHtml(m.name)} <span class="tag ${unlocked ? '' : 'locked'}">${unlocked ? 'Unlocked' : 'Lv ' + m.levelRequired + ' · ' + fmt(m.cost) + ' coins'}</span></h3>
+              <div class="desc">Tier ${m.tier} mine &middot; ${m.size.w}&times;${m.size.h} world &middot; best ores: ${mineBestOres(m).map(id => oreById(id) ? oreById(id).name : id).join(', ') || '—'}</div>
+              <div class="row">
+                ${isCurrent && unlocked ? `<button class="btn primary" data-action="join-mine" data-mine="${m.id}">Enter Mine</button>` : ''}
+                ${!isCurrent && unlocked ? `<button class="btn" data-action="select-mine" data-mine="${m.id}">Set Current</button>` : ''}
+                ${!unlocked ? `<button class="btn gold" data-action="unlock-mine" data-mine="${m.id}" ${canAfford ? '' : 'disabled'}>Unlock</button>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`}
+      <div class="xpbar"><div style="width:${clamp((player.xp / xpNeeded(player.level)) * 100, 0, 100)}%"></div></div>
+      <div class="controls-hint" style="margin-top:6px">${fmt(player.xp)} / ${fmt(xpNeeded(player.level))} XP to level ${player.level + 1} &middot; inventory ${invCount()}/${config ? config.inventoryCap : 80}</div>
+    </div>`;
+  if (room) initCanvas();
+  tickBuffs();
+}
+
+function mineBestOres(mine) {
+  return ORE_ORDER_SAFE.filter(id => (mine.weights[id] || 0) > 0)
+    .sort((a, b) => rarityRankSafe(b) - rarityRankSafe(a)).slice(0, 4);
+}
+const ORE_ORDER_SAFE = ['coal', 'copper', 'iron', 'gold', 'sapphire', 'diamond', 'ruby', 'emerald'];
+const RARITY_RANK = { Common: 0, Uncommon: 1, Rare: 2, Epic: 3, Legendary: 4, Mythic: 5 };
+function rarityRankSafe(oreId) { const o = oreById(oreId); return o ? (RARITY_RANK[o.rarity] || 0) : -1; }
+
+function renderInventory(root) {
+  const stacks = (player.inventory || []).slice().sort((a, b) => rarityRankSafe(b.oreId) - rarityRankSafe(a.oreId));
+  root.innerHTML = `
+    <div class="panel">
+      <div class="panel-title">Inventory <span class="muted" style="font-size:13px;font-weight:400">${invCount()} / ${config ? config.inventoryCap : 80} slots used</span></div>
+      ${stacks.length ? stacks.map(s => {
+        const ore = oreById(s.oreId);
+        const mine = mineById(s.mineId);
+        return `<div class="sell-row">
+          <div>
+            <b>${ore ? escapeHtml(ore.name) : s.oreId}</b>
+            <span class="muted" style="font-size:12px"> &times;${fmt(s.qty)} &middot; ${escapeHtml(mine ? mine.name : s.mineId)} &middot; ${fmt(s.value)} each</span>
+          </div>
+          <div class="flex">
+            <button class="btn small gold" data-action="sell-one" data-ore="${s.oreId}" data-mine="${s.mineId}">Sell 1</button>
+            <button class="btn small gold" data-action="sell-stack" data-ore="${s.oreId}" data-mine="${s.mineId}">Sell All (${fmt(s.qty)})</button>
+          </div>
+        </div>`;
+      }).join('') : `<div class="empty">No ores yet. Head into a mine and start digging.</div>`}
+      ${stacks.length ? `<div class="row" style="margin-top:16px"><button class="btn gold" data-action="sell-everything">Sell Everything</button></div>` : ''}
+    </div>`;
+}
+
+function renderShop(root) {
+  const tabs = [['pickaxes', 'Pickaxes'], ['mines', 'Mines'], ['supplies', 'Supplies']];
+  let body = '';
+  if (ui.shopTab === 'pickaxes') {
+    body = `<div class="grid cols-3">${config.pickaxes.map(p => {
+      const owned = player.pickaxes.includes(p.id);
+      const equipped = player.equippedPickaxe === p.id;
+      const locked = player.level < p.levelRequired;
+      const afford = player.coins >= p.price;
+      return `<div class="card">
+        <h3>${escapeHtml(p.name)} <span class="tag ${locked ? 'locked' : ''}">${equipped ? 'Equipped' : locked ? 'Lv ' + p.levelRequired : owned ? 'Owned' : fmt(p.price) + ' coins'}</span></h3>
+        <div class="desc">Mining speed &times;${p.speed} &middot; requires level ${p.levelRequired}</div>
+        <div class="row">
+          ${equipped ? '' : owned ? `<button class="btn" data-action="equip-pick" data-id="${p.id}">Equip</button>` : `<button class="btn gold" data-action="buy-pick" data-id="${p.id}" ${locked || !afford ? 'disabled' : ''}>Buy</button>`}
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  } else if (ui.shopTab === 'mines') {
+    body = `<div class="grid cols-3">${config.mines.map(m => {
+      const unlocked = player.minesUnlocked.includes(m.id);
+      const selected = player.currentMine === m.id;
+      const locked = player.level < m.levelRequired;
+      const afford = player.coins >= m.cost;
+      return `<div class="card">
+        <h3>${escapeHtml(m.name)} <span class="tag ${unlocked ? '' : 'locked'}">${unlocked ? (selected ? 'Current' : 'Unlocked') : 'Lv ' + m.levelRequired + ' · ' + fmt(m.cost)}</span></h3>
+        <div class="desc">Tier ${m.tier} &middot; value &times;${m.valueMult} &middot; world ${m.size.w}&times;${m.size.h}</div>
+        <div class="row">
+          ${selected ? '' : unlocked ? `<button class="btn" data-action="select-mine-shop" data-id="${m.id}">Set Current</button>` : `<button class="btn gold" data-action="unlock-mine-shop" data-id="${m.id}" ${locked || !afford ? 'disabled' : ''}>Unlock</button>`}
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  } else {
+    body = `<div class="grid cols-3">${config.consumables.map(c => {
+      const qty = (player.consumables && player.consumables[c.id]) || 0;
+      const active = player.buffs && player.buffs[c.id + 'Until'] > Date.now();
+      const afford = player.coins >= c.price;
+      return `<div class="card">
+        <h3>${escapeHtml(c.name)} <span class="tag ${active ? '' : 'locked'}">${active ? 'Active' : qty ? 'Owned: ' + qty : fmt(c.price) + ' coins'}</span></h3>
+        <div class="desc">${escapeHtml(c.description)}</div>
+        <div class="row">
+          <button class="btn gold" data-action="buy-consumable" data-id="${c.id}" ${afford ? '' : 'disabled'}>Buy</button>
+          <button class="btn" data-action="use-consumable" data-id="${c.id}" ${qty > 0 && !active ? '' : 'disabled'}>${active ? 'Active' : 'Use'}</button>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  }
+  root.innerHTML = `<div class="panel">
+    <div class="panel-title">Shop</div>
+    <div class="tabs-main" style="padding:0;margin-bottom:16px">
+      ${tabs.map(([id, label]) => `<button data-action="shop-tab" data-tab="${id}" class="${ui.shopTab === id ? 'active' : ''}" style="border-radius:8px">${label}</button>`).join('')}
+    </div>
+    ${body}
+  </div>`;
+}
+
+function renderLeaderboard(root) {
+  root.innerHTML = `<div class="panel"><div class="panel-title">Wealth Leaderboard</div><div id="lbBody"><div class="empty">Loading…</div></div></div>`;
+  api('/api/leaderboard?limit=50').then(d => {
+    const rows = d.leaderboard || [];
+    $('#lbBody').innerHTML = rows.length ? `<table class="lb">
+      <thead><tr><th>#</th><th>Miner</th><th>Level</th><th>Coins</th><th>Wealth</th></tr></thead>
+      <tbody>${rows.map(r => `<tr class="${player && r.userId === player.id ? 'you' : ''}">
+        <td class="rank">${r.rank}</td>
+        <td><b>${escapeHtml(r.username)}</b>${player && r.userId === player.id ? ' <span class="tag">You</span>' : ''}</td>
+        <td>${r.level}</td><td>${fmt(r.coins)}</td><td><b>${fmt(r.wealth)}</b></td>
+      </tr>`).join('')}</tbody></table>` : `<div class="empty">No miners yet.</div>`;
+  }).catch(() => { $('#lbBody').innerHTML = `<div class="empty">Could not load leaderboard.</div>`; });
+}
+
+function renderStats(root) {
+  const s = player.stats || {};
+  const mins = Math.floor((s.playTime || 0) / 60);
+  const hrs = Math.floor(mins / 60);
+  root.innerHTML = `<div class="panel">
+    <div class="panel-title">Stats</div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="k">Ores Mined</div><div class="v">${fmt(s.oresMined)}</div></div>
+      <div class="stat-box"><div class="k">Deposits Broken</div><div class="v">${fmt(s.depositsMined)}</div></div>
+      <div class="stat-box"><div class="k">Ores Sold</div><div class="v">${fmt(s.oresSold)}</div></div>
+      <div class="stat-box"><div class="k">Coins Earned</div><div class="v">${fmt(s.coinsEarned)}</div></div>
+      <div class="stat-box"><div class="k">Coins Spent</div><div class="v">${fmt(s.coinsSpent)}</div></div>
+      <div class="stat-box"><div class="k">Play Time</div><div class="v">${hrs ? hrs + 'h ' : ''}${mins % 60}m</div></div>
+      <div class="stat-box"><div class="k">Sessions</div><div class="v">${fmt(s.sessions)}</div></div>
+      <div class="stat-box"><div class="k">Rarest Ore</div><div class="v">${s.rarestOre ? escapeHtml((oreById(s.rarestOre) || {}).name || s.rarestOre) : '—'}</div></div>
+      <div class="stat-box"><div class="k">Achievements</div><div class="v">${(player.achievements || []).length}</div></div>
+    </div>
+  </div>`;
+}
+
+function renderSettings(root) {
+  root.innerHTML = `<div class="panel" style="max-width:520px">
+    <div class="panel-title">Settings</div>
+    <div class="field"><label>Username</label>
+      <div class="flex"><input id="setUsername" value="${escapeHtml(player.username)}" maxlength="24" style="flex:1">
+      <button class="btn" data-action="save-username">Save</button></div>
+      <div class="muted" style="font-size:12px;margin-top:6px">3-24 chars: letters, numbers, underscore.</div>
+    </div>
+    <div class="field"><label>Account</label>
+      <div class="muted" style="font-size:13px;margin-bottom:10px">Signed in as ${escapeHtml(player.username)}. Progress syncs to the cloud automatically.</div>
+      <button class="btn danger" data-action="logout">Log Out</button>
+    </div>
+  </div>`;
+}
+
+/* ============================== actions ============================== */
+async function doApi(path, body, okMsg) {
+  try {
+    const data = await api(path, { method: 'POST', body });
+    if (data.player) { player = data.player; syncTopbar(); }
+    if (okMsg) toast(okMsg.title, okMsg.sub || '', okMsg.tone || 'green');
+    refreshPlayerSoon();
+    return data;
+  } catch (e) {
+    toast('Action failed', errText(e.code || e.message), 'red');
+    return null;
+  }
+}
+
+/* ============================== room / gameplay ============================== */
+let room = null;
+let canvas = null, ctx = null, rafId = 0;
+const keys = {};
+const mouse = { x: 0, y: 0, down: false };
+let cam = { x: 0, y: 0 };
+const remotePlayers = new Map(); // id -> {x,y,tx,ty,angle,...}
+let selfPredict = { x: 0, y: 0, vx: 0, vy: 0 };
+let lastInputSent = 0;
+let inputSeq = 0;
+let pickupCooldown = 0;
+
+function roomRemoteAdd(p) {
+  remotePlayers.set(p.id, { ...p, tx: p.x, ty: p.y });
+}
+
+function applySnapshot(snap) {
+  if (!room) return;
+  for (const p of snap.players || []) {
+    const rp = remotePlayers.get(p.id) || { id: p.id };
+    Object.assign(rp, p, { tx: p.x, ty: p.y });
+    remotePlayers.set(p.id, rp);
+  }
+  for (const d of snap.drops || []) {
+    const drop = room.drops.get(d.id) || {};
+    Object.assign(drop, d, { x: d.x, y: d.y, vx: 0, vy: 0 });
+    room.drops.set(d.id, drop);
+  }
+}
+
+function maybeAutoJoin() {
+  // auto-join current mine if it was unlocked and player was recently in game view
+}
+
+async function joinMine(mineId) {
+  if (!socketReady || !socket) { toast('Not connected', 'Reconnecting…', 'red'); return; }
+  socket.emit('mine:join', { mineId }, (ack) => {
+    if (!ack || !ack.ok) { toast('Cannot enter mine', errText(ack && ack.error), 'red'); return; }
+    setupRoom(ack);
+    ui.view = 'game';
+    renderView();
+    api('/api/achievements/check', { method: 'POST' }).catch(() => {});
+  });
+}
+
+function setupRoom(ack) {
+  leaveRoomLocal(true);
+  room = {
+    id: ack.roomId,
+    mine: ack.mine,
+    world: ack.world,
+    selfId: ack.selfId,
+    deposits: new Map((ack.deposits || []).map(d => [d.id, { ...d }])),
+    drops: new Map((ack.drops || []).map(d => [d.id, { ...d, vx: 0, vy: 0 }])),
+    players: new Map()
+  };
+  remotePlayers.clear();
+  for (const p of ack.players || []) roomRemoteAdd(p);
+  const mine = ack.mine;
+  selfPredict = { x: mine.size.w / 2, y: mine.size.h / 2, vx: 0, vy: 0 };
+  cam = { x: selfPredict.x, y: selfPredict.y };
+}
+
+function leaveRoomLocal(silent) {
+  if (room && socket && socketReady && !silent) {
+    socket.emit('mine:leave', {}, () => {});
+  }
+  room = null;
+  remotePlayers.clear();
+  for (const k of Object.keys(keys)) keys[k] = false;
+  mouse.down = false;
+  myTargetId = null;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  if (canvas) { canvas.onmousemove = null; canvas.onmousedown = null; canvas.onmouseup = null; canvas.onmouseleave = null; canvas = null; ctx = null; }
+}
+
+function leaveMine() {
+  if (socket && socketReady) socket.emit('mine:leave', {}, () => {});
+  leaveRoomLocal(true);
+  ui.view = 'game';
+  renderView();
+}
+
+function resizeCanvas() {
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || canvas.parentElement.clientWidth - 4;
+  const h = Math.round(w * (room.mine.size.h / room.mine.size.w));
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.height = h + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  gameW = w; gameH = h;
+}
+let gameW = 0, gameH = 0;
+
+function initCanvas() {
+  canvas = $('#gameCanvas');
+  if (!canvas) return;
+  ctx = canvas.getContext('2d');
+  resizeCanvas();
+
+  const toWorld = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const sx = (e.clientX - rect.left) / rect.width;
+    const sy = (e.clientY - rect.top) / rect.height;
+    return {
+      x: cam.x + (sx - 0.5) * viewW2(),
+      y: cam.y + (sy - 0.5) * viewH2()
+    };
+  };
+
+  canvas.onmousemove = (e) => { const p = toWorld(e); mouse.x = p.x; mouse.y = p.y; };
+  canvas.onmousedown = (e) => { if (e.button === 0) { mouse.down = true; const p = toWorld(e); mouse.x = p.x; mouse.y = p.y; } };
+  window.addEventListener('mouseup', () => { mouse.down = false; });
+  canvas.onmouseleave = () => { mouse.down = false; };
+  canvas.oncontextmenu = (e) => e.preventDefault();
+
+  if (!rafId) rafId = requestAnimationFrame(gameLoop);
+}
+
+/* camera view helpers: world units visible across the canvas */
+function viewScale() { return gameH ? gameH / room.mine.size.h : 1; }
+function viewW2() { return gameW / viewScale(); }
+function viewH2() { return gameH / viewScale(); }
+
+const GAME_KEYS = ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyE','Space','Escape'];
+window.addEventListener('keydown', function gameKeyDown(e) {
+  if (!room) return;
+  if (GAME_KEYS.includes(e.code)) e.preventDefault();
+  keys[e.code] = true;
+  if (e.code === 'KeyE' || e.code === 'Space') doPickup();
+  if (e.code === 'Escape') leaveMine();
+});
+window.addEventListener('keyup', function gameKeyUp(e) { keys[e.code] = false; });
+window.addEventListener('resize', () => { if (room) resizeCanvas(); });
+
+function doPickup() {
+  if (!room || !socketReady) return;
+  const now = Date.now();
+  if (now < pickupCooldown) return;
+  pickupCooldown = now + 400;
+  socket.emit('mine:pickup', {}, (ack) => {
+    if (ack && !ack.ok && ack.error !== 'rate_limited') toast('Pickup', errText(ack.error), 'red');
+  });
+}
+
+function sendInput() {
+  if (!room || !socketReady) return;
+  const now = Date.now();
+  if (now - lastInputSent < 50) return;
+  lastInputSent = now;
+  inputSeq += 1;
+  socket.emit('mine:input', {
+    up: !!(keys.KeyW || keys.ArrowUp),
+    down: !!(keys.KeyS || keys.ArrowDown),
+    left: !!(keys.KeyA || keys.ArrowLeft),
+    right: !!(keys.KeyD || keys.ArrowRight),
+    aimX: mouse.x, aimY: mouse.y,
+    mining: mouse.down,
+    seq: inputSeq
+  });
+}
+
+/* local prediction matching server physics */
+const P_SPEED = 238, P_ACCEL = 1900, P_FRICTION = 2300, P_RADIUS = 16;
+function predictSelf(dt) {
+  const ix = ((keys.KeyD || keys.ArrowRight) ? 1 : 0) - ((keys.KeyA || keys.ArrowLeft) ? 1 : 0);
+  const iy = ((keys.KeyS || keys.ArrowDown) ? 1 : 0) - ((keys.KeyW || keys.ArrowUp) ? 1 : 0);
+  let nx = ix, ny = iy;
+  const len = Math.hypot(nx, ny);
+  if (len > 0) { nx /= len; ny /= len; }
+  selfPredict.vx += nx * P_ACCEL * dt;
+  selfPredict.vy += ny * P_ACCEL * dt;
+  if (!nx) selfPredict.vx = approach(selfPredict.vx, 0, P_FRICTION * dt);
+  if (!ny) selfPredict.vy = approach(selfPredict.vy, 0, P_FRICTION * dt);
+  const sp = Math.hypot(selfPredict.vx, selfPredict.vy);
+  if (sp > P_SPEED) { selfPredict.vx = selfPredict.vx / sp * P_SPEED; selfPredict.vy = selfPredict.vy / sp * P_SPEED; }
+  selfPredict.x += selfPredict.vx * dt;
+  selfPredict.y += selfPredict.vy * dt;
+  const m = (room.world.margin || 120) + 30;
+  selfPredict.x = clamp(selfPredict.x, m, room.mine.size.w - m);
+  selfPredict.y = clamp(selfPredict.y, m, room.mine.size.h - m);
+}
+function approach(v, t, d) { return v < t ? Math.min(v + d, t) : Math.max(v - d, t); }
+
+let lastT = 0;
+function gameLoop(t) {
+  if (!room) { rafId = 0; return; }
+  rafId = requestAnimationFrame(gameLoop);
+  const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
+  lastT = t;
+  sendInput();
+  predictSelf(dt);
+
+  // reconcile self with latest snapshot
+  const selfSnap = remotePlayers.get(room.selfId);
+  if (selfSnap) {
+    const err = Math.hypot(selfSnap.x - selfPredict.x, selfSnap.y - selfPredict.y);
+    if (err > 60) { selfPredict.x = selfSnap.x; selfPredict.y = selfSnap.y; selfPredict.vx = 0; selfPredict.vy = 0; }
+    else { selfPredict.x = lerp(selfPredict.x, selfSnap.x, 0.25); selfPredict.y = lerp(selfPredict.y, selfSnap.y, 0.25); }
+  }
+
+  // camera follows self
+  const vw = viewW2(), vh = viewH2();
+  cam.x = lerp(cam.x, selfPredict.x, 0.15);
+  cam.y = lerp(cam.y, selfPredict.y, 0.15);
+  cam.x = clamp(cam.x, vw / 2, room.mine.size.w - vw / 2);
+  cam.y = clamp(cam.y, vh / 2, room.mine.size.h - vh / 2);
+  if (room.mine.size.w < vw) cam.x = room.mine.size.w / 2;
+  if (room.mine.size.h < vh) cam.y = room.mine.size.h / 2;
+
+  // smooth remote players
+  for (const rp of remotePlayers.values()) {
+    rp.x = lerp(rp.x || rp.tx, rp.tx, 0.35);
+    rp.y = lerp(rp.y || rp.ty, rp.ty, 0.35);
+  }
+
+  // figure out which deposit the local player is currently working
+  myTargetId = null;
+  if (mouse.down) {
+    let best = null, bestScore = Infinity;
+    const reach = 138;
+    for (const d of room.deposits.values()) {
+      if (!d.active) continue;
+      const dx = d.x - selfPredict.x, dy = d.y - selfPredict.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > reach + d.r * 0.5) continue;
+      const overAim = Math.hypot(mouse.x - d.x, mouse.y - d.y) < d.r + 26;
+      const ang = Math.atan2(d.y - selfPredict.y, d.x - selfPredict.x);
+      let diff = Math.abs(ang - selfAngle());
+      if (diff > Math.PI) diff = Math.PI * 2 - diff;
+      if (!overAim && diff > 1) continue;
+      const score = Math.hypot(mouse.x - d.x, mouse.y - d.y) + dist * 0.18;
+      if (score < bestScore) { bestScore = score; best = d; }
+    }
+    myTargetId = best ? best.id : null;
+  }
+
+  tickBuffs();
+  draw(t / 1000);
+}
+
+function worldToScreen(wx, wy) {
+  const s = viewScale();
+  return { x: (wx - cam.x + viewW2() / 2) * s, y: (wy - cam.y + viewH2() / 2) * s };
+}
+
+function draw(now) {
+  if (!ctx || !room) return;
+  const w = gameW, h = gameH;
+  const themeColors = {
+    mossy: ['#0e2418', '#173623'],
+    crystal: ['#0d1c33', '#14304f'],
+    ember: ['#2b140e', '#47200f'],
+    frost: ['#0e1e2b', '#17394d'],
+    void: ['#170f2b', '#251543']
+  };
+  const [c1, c2] = themeColors[room.mine.theme] || themeColors.mossy;
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, c1); grad.addColorStop(1, c2);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  // deposits
+  for (const d of room.deposits.values()) {
+    const p = worldToScreen(d.x, d.y);
+    const r = d.r * viewScale();
+    if (p.x < -r || p.x > w + r || p.y < -r || p.y > h + r) continue;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = d.active ? '#3d4a63' : '#232c40';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = d.active ? '#55648a' : '#2c3650';
+    ctx.stroke();
+    // ore indicator
+    const ore = d.oreId ? oreById(d.oreId) : null;
+    if (ore && d.active) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 0.45, 0, Math.PI * 2);
+      ctx.fillStyle = ore.color || '#94a3b8';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x - r * 0.15, p.y - r * 0.15, r * 0.16, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      ctx.fill();
+    }
+    // progress arc for whoever is mining this deposit
+    let prog = 0, anyone = false;
+    for (const rp of remotePlayers.values()) {
+      if (rp.targetId === d.id && rp.targetProgress > prog) { prog = rp.targetProgress; anyone = true; }
+    }
+    if (d.id === myTargetId) { prog = Math.max(prog, d.progress || 0); anyone = true; }
+    if (d.active && anyone && prog > 0) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 6, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2);
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#fbbf24';
+      ctx.stroke();
+    }
+  }
+
+  // drops
+  for (const d of room.drops.values()) {
+    const p = worldToScreen(d.x, d.y);
+    const s = viewScale();
+    if (p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) continue;
+    const ore = oreById(d.oreId);
+    const col = (ore && ore.color) || '#94a3b8';
+    const bob = Math.sin(now * 4 + (d.id ? parseInt(String(d.id).slice(1)) || 0 : 0)) * 3 * s;
+    drawGem(p.x, p.y + bob, 7 * s + 3, col);
+  }
+
+  // remote players
+  for (const rp of remotePlayers.values()) {
+    if (rp.id === room.selfId) continue;
+    drawPlayer(rp.x, rp.y, rp.angle || 0, rp.username, rp.level, rp.equippedPickaxe, false);
+  }
+
+  // self
+  drawPlayer(selfPredict.x, selfPredict.y, selfAngle(), player.username, player.level, player.equippedPickaxe, true);
+
+  // mining beam hint
+  if (mouse.down) {
+    const sp = worldToScreen(selfPredict.x, selfPredict.y);
+    const mp = worldToScreen(mouse.x, mouse.y);
+    ctx.strokeStyle = 'rgba(251,191,36,.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(mp.x, mp.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+let myTargetId = null;
+function selfAngle() {
+  return Math.atan2(mouse.y - selfPredict.y, mouse.x - selfPredict.x);
+}
+
+function drawPlayer(wx, wy, angle, name, level, pickId, isSelf) {
+  const p = worldToScreen(wx, wy);
+  const s = viewScale();
+  const r = P_RADIUS * s;
+  const pick = pickById(pickId);
+  const bodyCol = isSelf ? '#38bdf8' : playerColor(name);
+
+  // pickaxe
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(angle);
+  ctx.strokeStyle = pick ? pick.color : '#94a3b8';
+  ctx.lineWidth = 4 * s;
+  ctx.beginPath(); ctx.moveTo(r * 0.6, 0); ctx.lineTo(r * 1.7, 0); ctx.stroke();
+  ctx.restore();
+
+  // body
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = bodyCol;
+  ctx.fill();
+  ctx.lineWidth = isSelf ? 3 : 2;
+  ctx.strokeStyle = isSelf ? '#fff' : 'rgba(0,0,0,.4)';
+  ctx.stroke();
+
+  // name + level
+  ctx.font = `${Math.max(10, 11 * s)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = isSelf ? '#fff' : 'rgba(255,255,255,.85)';
+  ctx.fillText(name, p.x, p.y - r - 14 * s);
+  ctx.font = `bold ${Math.max(9, 9 * s)}px sans-serif`;
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText('Lv ' + level, p.x, p.y - r - 2 * s);
+}
+
+function playerColor(name) {
+  const hues = [210, 160, 30, 280, 340, 100, 190, 20];
+  return `hsl(${hues[hashStr(name) % hues.length]}, 70%, 55%)`;
+}
+
+function drawGem(x, y, r, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.beginPath();
+  ctx.moveTo(0, -r); ctx.lineTo(r * 0.8, 0); ctx.lineTo(0, r); ctx.lineTo(-r * 0.8, 0);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.5)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function tickBuffs() {
+  const el = $('#buffHud');
+  if (!el || !player) return;
+  const defs = { tonic: 'Energy Tonic', magnet: 'Ore Magnet', charm: 'Lucky Charm' };
+  const now = Date.now();
+  const chips = Object.keys(defs).map(id => {
+    const until = player.buffs && player.buffs[id + 'Until'] ? player.buffs[id + 'Until'] : 0;
+    const left = Math.max(0, Math.ceil((until - now) / 1000));
+    return `<span class="buff-chip ${left > 0 ? 'active' : ''}">${defs[id]} ${left > 0 ? left + 's' : '—'}</span>`;
+  }).join('');
+  if (el._last !== chips) { el.innerHTML = chips; el._last = chips; }
+}
+
+/* cleanup listeners when leaving room handled by re-render; window listeners persist but guard on room */
+
+/* ============================== global click delegation ============================== */
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+
+  if (action === 'pick-mine') {
+    if (player.minesUnlocked.includes(btn.dataset.mine)) joinMine(btn.dataset.mine);
+    return;
+  }
+  if (action === 'join-current' && player) { joinMine(player.currentMine); return; }
+  if (action === 'join-mine') { joinMine(btn.dataset.mine); return; }
+  if (action === 'select-mine') {
+    const d = await doApi('/api/mine/select', { mineId: btn.dataset.mine });
+    if (d) { ui.view = 'game'; renderView(); }
+    return;
+  }
+  if (action === 'unlock-mine' || action === 'unlock-mine-shop') {
+    const d = await doApi('/api/mine/unlock', { mineId: btn.dataset.mine || btn.dataset.id }, { title: 'Mine unlocked' });
+    if (d) renderView();
+    return;
+  }
+  if (action === 'leave-mine') { leaveMine(); return; }
+  if (action === 'sell-one' || action === 'sell-stack') {
+    const qty = action === 'sell-stack' ? 999 : 1;
+    const d = await doApi('/api/inventory/sell', { oreId: btn.dataset.ore, mineId: btn.dataset.mine, quantity: qty }, { title: 'Sold!', tone: 'gold' });
+    if (d) renderView();
+    return;
+  }
+  if (action === 'sell-everything') {
+    let sold = 0;
+    for (const s of (player.inventory || []).slice()) {
+      await api('/api/inventory/sell', { method: 'POST', body: { oreId: s.oreId, mineId: s.mineId, quantity: 999 } }).catch(() => {});
+      sold++;
+    }
+    toast('Sold everything', '', 'gold');
+    refreshPlayerSoon();
+    renderView();
+    return;
+  }
+  if (action === 'buy-pick') { const d = await doApi('/api/pickaxe/buy', { pickaxeId: btn.dataset.id }); if (d) renderView(); return; }
+  if (action === 'equip-pick') { const d = await doApi('/api/pickaxe/equip', { pickaxeId: btn.dataset.id }); if (d) renderView(); return; }
+  if (action === 'select-mine-shop') { const d = await doApi('/api/mine/select', { mineId: btn.dataset.id }); if (d) renderView(); return; }
+  if (action === 'buy-consumable') {
+    const d = await doApi('/api/consumable/buy', { consumableId: btn.dataset.id }, { title: 'Purchased' });
+    if (d) renderView();
+    return;
+  }
+  if (action === 'use-consumable') {
+    const d = await doApi('/api/consumable/use', { consumableId: btn.dataset.id }, { title: 'Buff activated', tone: 'green' });
+    if (d) renderView();
+    return;
+  }
+  if (action === 'shop-tab') { ui.shopTab = btn.dataset.tab; renderView(); return; }
+  if (action === 'save-username') {
+    const username = ($('#setUsername') || {}).value || '';
+    const d = await doApi('/api/username', { username }, { title: 'Username updated' });
+    if (d) renderView();
+    return;
+  }
+  if (action === 'logout') { logout(); return; }
+});
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#mainNav button');
+  if (!btn) return;
+  if (room && btn.dataset.view !== 'game') leaveRoomLocal();
+  ui.view = btn.dataset.view;
+  renderView();
+});
+
+$('#tabLogin').addEventListener('click', () => setAuthMode('login'));
+$('#tabSignup').addEventListener('click', () => setAuthMode('signup'));
+$('#authForm').addEventListener('submit', submitAuth);
+
+/* ============================== boot ============================== */
+loadSession();
+(async function boot() {
+  if (session && session.accessToken) {
+    try {
+      await getToken();
+      connectSocket();
+      // session:ready will boot the app; safety timeout
+      setTimeout(() => {
+        if (!player && session) {
+          toast('Connection issue', 'Could not reach game server.', 'red');
+          logout();
+        }
+      }, 8000);
+      return;
+    } catch { /* fall through to auth */ }
+  }
+  $('#authScreen').style.display = 'flex';
+})();
+</script>
+</body>
+</html>

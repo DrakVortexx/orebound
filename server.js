@@ -696,6 +696,169 @@ app.post('/api/auth/refresh', authRateLimit, async (req, res) => {
   }
 });
 
+const CLOUD_STAT_MAP = {
+  oresMined: 'ores_mined',
+  depositsMined: 'deposits_mined',
+  coinsEarned: 'coins_earned',
+  coinsSpent: 'coins_spent',
+  oresSold: 'ores_sold',
+  playTime: 'play_time_seconds',
+  rarestTier: 'rarest_tier',
+  rarestOre: 'rarest_ore',
+  sessions: 'sessions'
+};
+
+let achievementIdCache = null;
+async function validAchievementIds() {
+  if (!achievementIdCache) {
+    const { data, error } = await supabase.from('achievement_defs').select('id');
+    if (error) throw error;
+    achievementIdCache = new Set((data || []).map(row => row.id));
+  }
+  return achievementIdCache;
+}
+
+async function saveCloudState(userId, body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const pickaxeIds = new Set(PICKAXE_ORDER);
+  const mineIds = new Set(MINE_ORDER);
+  const consumableIds = new Set(CONSUMABLE_ORDER);
+
+  const username = typeof b.username === 'string' ? b.username.trim() : '';
+  if (USERNAME_RE.test(username)) {
+    const { data: prof, error: profError } = await supabase
+      .from('profiles').select('username').eq('id', userId).maybeSingle();
+    if (profError) throw profError;
+    if (prof && prof.username !== username) {
+      const { error } = await supabase.from('profiles').update({ username }).eq('id', userId);
+      if (error) throw error;
+    }
+  }
+
+  const level = clampInt(b.level, 1, 1, 10000);
+  const xp = Math.max(0, Math.min(Math.floor(Number(b.xp) || 0), 1e15));
+  const coins = Math.max(0, Math.min(Math.floor(Number(b.coins) || 0), 1e15));
+  const equippedPickaxe = pickaxeIds.has(b.equippedPickaxe) ? b.equippedPickaxe : 'basic';
+
+  const inventoryRows = [];
+  const seenStacks = new Set();
+  let invTotal = 0;
+  for (const item of Array.isArray(b.inventory) ? b.inventory : []) {
+    const oreId = String(item && item.oreId || '');
+    const mineId = String(item && item.mineId || '');
+    const quantity = Math.floor(Number(item && item.quantity) || 0);
+    const unitValue = Math.floor(Number(item && item.unitValue) || 0);
+    if (!ORES[oreId] || !MINES[mineId] || quantity < 1 || unitValue < 1) continue;
+    const key = oreId + '|' + mineId;
+    if (seenStacks.has(key)) continue;
+    seenStacks.add(key);
+    invTotal += quantity;
+    if (invTotal > 200000) break;
+    inventoryRows.push({
+      user_id: userId,
+      ore_id: oreId,
+      mine_id: mineId,
+      quantity: Math.min(quantity, 200000),
+      unit_value: unitValue
+    });
+  }
+
+  const pickaxes = Array.from(new Set(
+    (Array.isArray(b.pickaxes) ? b.pickaxes : []).map(String).filter(id => pickaxeIds.has(id))
+  ));
+  if (!pickaxes.includes('basic')) pickaxes.unshift('basic');
+
+  const mines = Array.from(new Set(
+    (Array.isArray(b.minesUnlocked) ? b.minesUnlocked : []).map(String).filter(id => mineIds.has(id))
+  ));
+  if (!mines.includes('mossy')) mines.unshift('mossy');
+  const currentMine = mines.includes(b.currentMine) ? b.currentMine : 'mossy';
+
+  const consumableRows = [];
+  for (const id of consumableIds) {
+    const qty = Math.floor(Number(b.consumables && b.consumables[id]) || 0);
+    if (qty > 0) consumableRows.push({ user_id: userId, consumable_id: id, quantity: Math.min(qty, 200000) });
+  }
+
+  const statsRow = { user_id: userId, updated_at: new Date().toISOString() };
+  const rawStats = b.stats && typeof b.stats === 'object' ? b.stats : {};
+  for (const [key, column] of Object.entries(CLOUD_STAT_MAP)) {
+    if (key === 'rarestOre') {
+      statsRow[column] = ORES[rawStats[key]] ? rawStats[key] : null;
+    } else if (key === 'rarestTier') {
+      statsRow[column] = clampInt(rawStats[key], -1, -1, 5);
+    } else {
+      statsRow[column] = Math.max(0, Math.min(Math.floor(Number(rawStats[key]) || 0), 1e15));
+    }
+  }
+
+  const validAchievements = await validAchievementIds();
+  const achievementRows = Array.from(new Set(
+    (Array.isArray(b.achievements) ? b.achievements : []).map(String).filter(id => validAchievements.has(id))
+  )).map(id => ({ user_id: userId, achievement_id: id }));
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({
+      level,
+      xp,
+      coins,
+      current_mine: currentMine,
+      equipped_pickaxe: equippedPickaxe
+    })
+    .eq('id', userId);
+  if (profileError) throw profileError;
+
+  const { error: invDeleteError } = await supabase.from('inventory').delete().eq('user_id', userId);
+  if (invDeleteError) throw invDeleteError;
+  if (inventoryRows.length) {
+    const { error } = await supabase.from('inventory').insert(inventoryRows);
+    if (error) throw error;
+  }
+
+  const { error: pickDeleteError } = await supabase.from('player_pickaxes').delete().eq('user_id', userId);
+  if (pickDeleteError) throw pickDeleteError;
+  const { error: pickInsertError } = await supabase
+    .from('player_pickaxes')
+    .insert(pickaxes.map(id => ({ user_id: userId, pickaxe_id: id })));
+  if (pickInsertError) throw pickInsertError;
+
+  const { error: mineDeleteError } = await supabase.from('player_mines').delete().eq('user_id', userId);
+  if (mineDeleteError) throw mineDeleteError;
+  const { error: mineInsertError } = await supabase
+    .from('player_mines')
+    .insert(mines.map(id => ({ user_id: userId, mine_id: id })));
+  if (mineInsertError) throw mineInsertError;
+
+  const { error: consDeleteError } = await supabase.from('player_consumables').delete().eq('user_id', userId);
+  if (consDeleteError) throw consDeleteError;
+  if (consumableRows.length) {
+    const { error } = await supabase.from('player_consumables').insert(consumableRows);
+    if (error) throw error;
+  }
+
+  const { error: statsError } = await supabase.from('player_stats').upsert(statsRow, { onConflict: 'user_id' });
+  if (statsError) throw statsError;
+
+  const { error: achDeleteError } = await supabase.from('player_achievements').delete().eq('user_id', userId);
+  if (achDeleteError) throw achDeleteError;
+  if (achievementRows.length) {
+    const { error } = await supabase.from('player_achievements').insert(achievementRows);
+    if (error) throw error;
+  }
+
+  return { saved: true };
+}
+
+app.post('/api/state', requireAuth, async (req, res) => {
+  try {
+    const result = await saveCloudState(req.user.id, req.body);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 app.get('/api/me', requireAuth, async (req, res) => {
   try {
     const player = activePlayers.get(req.user.id) || await loadPlayerState(req.user.id);
@@ -1740,6 +1903,9 @@ if (SERVE_STATIC) {
   });
   app.get('/index.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
+  });
+  app.get('/multiplayer.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'multiplayer.html'));
   });
   app.use('/assets', express.static(path.join(__dirname, 'assets'), {
     fallthrough: true,
