@@ -13,7 +13,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const PORT = clampInt(process.env.PORT, 3000, 1, 65535);
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*';
 const MAX_PLAYERS_PER_ROOM = clampInt(process.env.MAX_PLAYERS_PER_ROOM, 8, 1, 32);
 const MAX_ROOMS = clampInt(process.env.MAX_ROOMS, 24, 1, 200);
@@ -34,16 +34,16 @@ const MINING_REACH = 138;
 const DROP_CAP = 180;
 const MAX_PICKUPS_PER_ACTION = 8;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   console.error(JSON.stringify({
     level: 'fatal',
     message: 'missing_supabase_environment',
-    required: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
+    required: ['SUPABASE_URL', 'SUPABASE_SECRET_KEY']
   }));
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
   auth: {
     persistSession: false,
     autoRefreshToken: false,
