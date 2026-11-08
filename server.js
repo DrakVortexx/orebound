@@ -61,17 +61,38 @@ const RARITIES = {
 };
 
 const ORES = {
+  limestone: { id: 'limestone', name: 'Limestone', rarity: 'Common', rarityRank: 0, value: 5, duration: 1.4, xp: 4, color: '#b8b0a4' },
   coal: { id: 'coal', name: 'Coal', rarity: 'Common', rarityRank: 0, value: 7, duration: 1.65, xp: 5, color: '#5c6576' },
+  flint: { id: 'flint', name: 'Flint', rarity: 'Common', rarityRank: 0, value: 10, duration: 1.85, xp: 7, color: '#7d8590' },
   copper: { id: 'copper', name: 'Copper', rarity: 'Uncommon', rarityRank: 1, value: 16, duration: 2.25, xp: 9, color: '#e08a4b' },
+  tin: { id: 'tin', name: 'Tin', rarity: 'Uncommon', rarityRank: 1, value: 24, duration: 2.45, xp: 12, color: '#b9c4d0' },
+  quartz: { id: 'quartz', name: 'Quartz', rarity: 'Uncommon', rarityRank: 1, value: 30, duration: 2.65, xp: 13, color: '#d8c8f0' },
   iron: { id: 'iron', name: 'Iron', rarity: 'Rare', rarityRank: 2, value: 38, duration: 3.05, xp: 17, color: '#c3ccdb' },
+  silver: { id: 'silver', name: 'Silver', rarity: 'Rare', rarityRank: 2, value: 36, duration: 2.85, xp: 15, color: '#d7dee8' },
+  meteorite: { id: 'meteorite', name: 'Meteorite', rarity: 'Rare', rarityRank: 2, value: 58, duration: 3.4, xp: 21, color: '#8a7f8f' },
+  adamantite: { id: 'adamantite', name: 'Adamantite', rarity: 'Rare', rarityRank: 2, value: 74, duration: 3.75, xp: 25, color: '#9fb4c8' },
   gold: { id: 'gold', name: 'Gold', rarity: 'Epic', rarityRank: 3, value: 95, duration: 4.15, xp: 34, color: '#f7c948' },
+  topaz: { id: 'topaz', name: 'Topaz', rarity: 'Epic', rarityRank: 3, value: 150, duration: 4.6, xp: 44, color: '#f0b53f' },
+  opal: { id: 'opal', name: 'Opal', rarity: 'Epic', rarityRank: 3, value: 185, duration: 4.95, xp: 50, color: '#9fe8d8' },
   sapphire: { id: 'sapphire', name: 'Sapphire', rarity: 'Legendary', rarityRank: 4, value: 240, duration: 5.4, xp: 62, color: '#4d8dff' },
+  jade: { id: 'jade', name: 'Jade', rarity: 'Legendary', rarityRank: 4, value: 300, duration: 5.75, xp: 78, color: '#3ecf8e' },
   diamond: { id: 'diamond', name: 'Diamond', rarity: 'Legendary', rarityRank: 4, value: 340, duration: 5.95, xp: 82, color: '#37e6f0' },
+  amber: { id: 'amber', name: 'Amber', rarity: 'Legendary', rarityRank: 4, value: 390, duration: 6.15, xp: 92, color: '#ff9d45' },
   ruby: { id: 'ruby', name: 'Ruby', rarity: 'Mythic', rarityRank: 5, value: 430, duration: 6.7, xp: 104, color: '#ff4d6a' },
-  emerald: { id: 'emerald', name: 'Emerald', rarity: 'Mythic', rarityRank: 5, value: 450, duration: 6.85, xp: 108, color: '#3ce07a' }
+  emerald: { id: 'emerald', name: 'Emerald', rarity: 'Mythic', rarityRank: 5, value: 450, duration: 6.85, xp: 108, color: '#3ce07a' },
+  starsteel: { id: 'starsteel', name: 'Starsteel', rarity: 'Mythic', rarityRank: 5, value: 540, duration: 7.3, xp: 124, color: '#a5b4fc' },
+  voidstone: { id: 'voidstone', name: 'Voidstone', rarity: 'Mythic', rarityRank: 5, value: 660, duration: 7.7, xp: 140, color: '#7c5cd6' },
+  celestium: { id: 'celestium', name: 'Celestium', rarity: 'Mythic', rarityRank: 5, value: 850, duration: 8.3, xp: 165, color: '#7de3f4' }
 };
 
-const ORE_ORDER = ['coal', 'copper', 'iron', 'gold', 'sapphire', 'diamond', 'ruby', 'emerald'];
+const ORE_ORDER = [
+  'limestone', 'coal', 'flint',
+  'copper', 'tin', 'quartz',
+  'iron', 'silver', 'meteorite', 'adamantite',
+  'gold', 'topaz', 'opal',
+  'sapphire', 'jade', 'diamond', 'amber',
+  'ruby', 'emerald', 'starsteel', 'voidstone', 'celestium'
+];
 
 const PICKAXES = {
   basic: { id: 'basic', name: 'Basic Pickaxe', price: 0, speed: 1, levelRequired: 1, color: '#94a3b8' },
@@ -89,27 +110,62 @@ const MINES = {
   mossy: {
     id: 'mossy', name: 'Mossy Hollow', levelRequired: 1, cost: 0, tier: 1, valueMult: 1, oreChance: 0.76,
     size: { w: 2400, h: 1600 }, theme: 'mossy', accent: '#34d399',
-    weights: { coal: 100, copper: 58, iron: 18, gold: 3.2, sapphire: 0.5, diamond: 0.16, ruby: 0.04, emerald: 0.04 }
+    weights: {
+      limestone: 140, coal: 100, flint: 72,
+      copper: 55, tin: 34, quartz: 22,
+      iron: 17, silver: 9, meteorite: 3.5, adamantite: 1.4,
+      gold: 3.2, topaz: 1.1, opal: 0.5,
+      sapphire: 0.5, jade: 0.2, diamond: 0.16, amber: 0.1,
+      ruby: 0.04, emerald: 0.04, starsteel: 0.02, voidstone: 0.01, celestium: 0.005
+    }
   },
   crystal: {
     id: 'crystal', name: 'Crystal Cavern', levelRequired: 3, cost: 500, tier: 2, valueMult: 1.6, oreChance: 0.76,
     size: { w: 2600, h: 1700 }, theme: 'crystal', accent: '#38bdf8',
-    weights: { coal: 55, copper: 75, iron: 48, gold: 11, sapphire: 3.4, diamond: 1.5, ruby: 0.45, emerald: 0.4 }
+    weights: {
+      limestone: 85, coal: 55, flint: 58,
+      copper: 78, tin: 55, quartz: 42,
+      iron: 45, silver: 26, meteorite: 8, adamantite: 4,
+      gold: 12, topaz: 5.5, opal: 2.8,
+      sapphire: 3.4, jade: 1.6, diamond: 1.5, amber: 0.9,
+      ruby: 0.45, emerald: 0.4, starsteel: 0.12, voidstone: 0.06, celestium: 0.03
+    }
   },
   ember: {
     id: 'ember', name: 'Ember Depths', levelRequired: 7, cost: 2200, tier: 3, valueMult: 2.4, oreChance: 0.76,
     size: { w: 2700, h: 1750 }, theme: 'ember', accent: '#fb923c',
-    weights: { coal: 32, copper: 55, iron: 70, gold: 24, sapphire: 6, diamond: 3.2, ruby: 1.8, emerald: 1.2 }
+    weights: {
+      limestone: 50, coal: 32, flint: 42,
+      copper: 60, tin: 62, quartz: 55,
+      iron: 70, silver: 42, meteorite: 16, adamantite: 9,
+      gold: 26, topaz: 13, opal: 7,
+      sapphire: 6, jade: 3.6, diamond: 3.2, amber: 2.2,
+      ruby: 1.8, emerald: 1.2, starsteel: 0.45, voidstone: 0.22, celestium: 0.1
+    }
   },
   frost: {
     id: 'frost', name: 'Frostbite Abyss', levelRequired: 12, cost: 7500, tier: 4, valueMult: 3.6, oreChance: 0.76,
     size: { w: 2800, h: 1800 }, theme: 'frost', accent: '#7dd3fc',
-    weights: { coal: 16, copper: 34, iron: 62, gold: 34, sapphire: 13, diamond: 7, ruby: 3.6, emerald: 3.2 }
+    weights: {
+      limestone: 28, coal: 16, flint: 32,
+      copper: 40, tin: 48, quartz: 60,
+      iron: 62, silver: 55, meteorite: 26, adamantite: 16,
+      gold: 36, topaz: 22, opal: 13,
+      sapphire: 13, jade: 9, diamond: 7, amber: 5,
+      ruby: 3.6, emerald: 3.2, starsteel: 1.4, voidstone: 0.8, celestium: 0.4
+    }
   },
   void: {
     id: 'void', name: 'Voidreach', levelRequired: 18, cost: 25000, tier: 5, valueMult: 5.5, oreChance: 0.76,
     size: { w: 2900, h: 1850 }, theme: 'void', accent: '#c084fc',
-    weights: { coal: 8, copper: 18, iron: 46, gold: 48, sapphire: 26, diamond: 16, ruby: 9, emerald: 8 }
+    weights: {
+      limestone: 12, coal: 8, flint: 18,
+      copper: 22, tin: 34, quartz: 55,
+      iron: 46, silver: 60, meteorite: 42, adamantite: 32,
+      gold: 50, topaz: 38, opal: 24,
+      sapphire: 26, jade: 20, diamond: 16, amber: 12,
+      ruby: 9, emerald: 8, starsteel: 4.5, voidstone: 3.2, celestium: 2
+    }
   }
 };
 
@@ -122,6 +178,33 @@ const CONSUMABLES = {
 };
 
 const CONSUMABLE_ORDER = ['tonic', 'magnet', 'charm'];
+
+// Achievement definitions live in code — the database only stores
+// which ones a player has unlocked (player_unlocks).
+const ACHIEVEMENTS = [
+  { id: 'first_deposit', name: 'First Swing', desc: 'Break your first deposit.', reward: 25, sortOrder: 1, metric: 'deposits_mined', threshold: 1 },
+  { id: 'first_ore', name: 'First Find', desc: 'Collect your first ore.', reward: 40, sortOrder: 2, metric: 'ores_mined', threshold: 1 },
+  { id: 'ore_100', name: 'Prospector', desc: 'Collect 100 ores.', reward: 300, sortOrder: 3, metric: 'ores_mined', threshold: 100 },
+  { id: 'ore_1000', name: 'Master Miner', desc: 'Collect 1,000 ores.', reward: 3000, sortOrder: 4, metric: 'ores_mined', threshold: 1000 },
+  { id: 'deposits_100', name: 'Rockbreaker', desc: 'Break 100 deposits.', reward: 500, sortOrder: 5, metric: 'deposits_mined', threshold: 100 },
+  { id: 'sold_100', name: 'Market Regular', desc: 'Sell 100 ores.', reward: 400, sortOrder: 6, metric: 'ores_sold', threshold: 100 },
+  { id: 'rare_find', name: 'Rare Find', desc: 'Collect a Rare or better ore.', reward: 150, sortOrder: 7, metric: 'rarest_tier', threshold: 2 },
+  { id: 'epic_find', name: 'Epic Discovery', desc: 'Collect an Epic ore.', reward: 400, sortOrder: 8, metric: 'rarest_tier', threshold: 3 },
+  { id: 'legendary_find', name: 'Legendary Strike', desc: 'Collect a Legendary ore.', reward: 1200, sortOrder: 9, metric: 'rarest_tier', threshold: 4 },
+  { id: 'mythic_find', name: 'Mythic Fortune', desc: 'Collect a Mythic ore.', reward: 3000, sortOrder: 10, metric: 'rarest_tier', threshold: 5 },
+  { id: 'level_5', name: 'Getting Deep', desc: 'Reach level 5.', reward: 200, sortOrder: 11, metric: 'level', threshold: 5 },
+  { id: 'level_10', name: 'Seasoned Miner', desc: 'Reach level 10.', reward: 700, sortOrder: 12, metric: 'level', threshold: 10 },
+  { id: 'level_18', name: 'Deep Dweller', desc: 'Reach level 18.', reward: 2500, sortOrder: 13, metric: 'level', threshold: 18 },
+  { id: 'coins_1000', name: 'Payday', desc: 'Earn 1,000 coins total.', reward: 300, sortOrder: 14, metric: 'coins_earned', threshold: 1000 },
+  { id: 'coins_25000', name: 'Tycoon', desc: 'Earn 25,000 coins total.', reward: 2500, sortOrder: 15, metric: 'coins_earned', threshold: 25000 },
+  { id: 'coins_100000', name: 'Ore Baron', desc: 'Earn 100,000 coins total.', reward: 15000, sortOrder: 16, metric: 'coins_earned', threshold: 100000 },
+  { id: 'all_mines', name: 'The Deep End', desc: 'Unlock every mine.', reward: 8000, sortOrder: 17, metric: 'mine_count', threshold: MINE_ORDER.length },
+  { id: 'all_picks', name: 'Full Arsenal', desc: 'Own every pickaxe.', reward: 12000, sortOrder: 18, metric: 'pick_count', threshold: PICKAXE_ORDER.length }
+];
+const ACHIEVEMENT_IDS = new Set(ACHIEVEMENTS.map(a => a.id));
+const ACHIEVEMENT_DEFS_PAYLOAD = ACHIEVEMENTS.map(a => ({
+  id: a.id, name: a.name, reward_coins: a.reward, sort_order: a.sortOrder, metric: a.metric, threshold: a.threshold
+}));
 
 const ERROR_STATUS = {
   unauthorized: 401,
@@ -332,17 +415,14 @@ function defaultStats() {
 }
 
 async function loadPlayerState(userId) {
-  const [profileRes, statsRes, inventoryRes, pickaxesRes, minesRes, consumablesRes, achievementsRes] = await Promise.all([
+  const [profileRes, statsRes, inventoryRes, unlocksRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
     supabase.from('player_stats').select('*').eq('user_id', userId).maybeSingle(),
     supabase.from('inventory').select('ore_id,mine_id,quantity,unit_value').eq('user_id', userId),
-    supabase.from('player_pickaxes').select('pickaxe_id').eq('user_id', userId),
-    supabase.from('player_mines').select('mine_id').eq('user_id', userId),
-    supabase.from('player_consumables').select('consumable_id,quantity').eq('user_id', userId),
-    supabase.from('player_achievements').select('achievement_id').eq('user_id', userId)
+    supabase.from('player_unlocks').select('kind,ref_id,quantity').eq('user_id', userId)
   ]);
 
-  for (const result of [profileRes, statsRes, inventoryRes, pickaxesRes, minesRes, consumablesRes, achievementsRes]) {
+  for (const result of [profileRes, statsRes, inventoryRes, unlocksRes]) {
     if (result.error) throw result.error;
   }
 
@@ -361,16 +441,18 @@ async function loadPlayerState(userId) {
     });
   }
 
-  const pickaxes = new Set((pickaxesRes.data || []).map(row => row.pickaxe_id).filter(id => PICKAXES[id]));
-  pickaxes.add('basic');
-
-  const mines = new Set((minesRes.data || []).map(row => row.mine_id).filter(id => MINES[id]));
-  mines.add('mossy');
-
+  const pickaxes = new Set();
+  const mines = new Set();
   const consumables = new Map(CONSUMABLE_ORDER.map(id => [id, 0]));
-  for (const row of consumablesRes.data || []) {
-    if (CONSUMABLES[row.consumable_id]) consumables.set(row.consumable_id, Math.max(0, toInt(row.quantity, 0)));
+  const achievements = new Set();
+  for (const row of unlocksRes.data || []) {
+    if (row.kind === 'pickaxe' && PICKAXES[row.ref_id]) pickaxes.add(row.ref_id);
+    else if (row.kind === 'mine' && MINES[row.ref_id]) mines.add(row.ref_id);
+    else if (row.kind === 'consumable' && CONSUMABLES[row.ref_id]) consumables.set(row.ref_id, Math.max(0, toInt(row.quantity, 0)));
+    else if (row.kind === 'achievement') achievements.add(row.ref_id);
   }
+  pickaxes.add('basic');
+  mines.add('mossy');
 
   const statsRow = statsRes.data || {};
   const stats = {
@@ -404,7 +486,7 @@ async function loadPlayerState(userId) {
     pickaxes,
     mines,
     consumables,
-    achievements: new Set((achievementsRes.data || []).map(row => row.achievement_id)),
+    achievements,
     stats,
     roomId: null,
     socketId: null,
@@ -708,14 +790,8 @@ const CLOUD_STAT_MAP = {
   sessions: 'sessions'
 };
 
-let achievementIdCache = null;
 async function validAchievementIds() {
-  if (!achievementIdCache) {
-    const { data, error } = await supabase.from('achievement_defs').select('id');
-    if (error) throw error;
-    achievementIdCache = new Set((data || []).map(row => row.id));
-  }
-  return achievementIdCache;
+  return ACHIEVEMENT_IDS;
 }
 
 async function saveCloudState(userId, body) {
@@ -777,7 +853,7 @@ async function saveCloudState(userId, body) {
   const consumableRows = [];
   for (const id of consumableIds) {
     const qty = Math.floor(Number(b.consumables && b.consumables[id]) || 0);
-    if (qty > 0) consumableRows.push({ user_id: userId, consumable_id: id, quantity: Math.min(qty, 200000) });
+    if (qty > 0) consumableRows.push({ kind: 'consumable', ref_id: id, quantity: Math.min(qty, 200000) });
   }
 
   const statsRow = { user_id: userId, updated_at: new Date().toISOString() };
@@ -795,7 +871,14 @@ async function saveCloudState(userId, body) {
   const validAchievements = await validAchievementIds();
   const achievementRows = Array.from(new Set(
     (Array.isArray(b.achievements) ? b.achievements : []).map(String).filter(id => validAchievements.has(id))
-  )).map(id => ({ user_id: userId, achievement_id: id }));
+  )).map(id => ({ kind: 'achievement', ref_id: id, quantity: 1 }));
+
+  const unlockRows = [
+    ...pickaxes.map(id => ({ kind: 'pickaxe', ref_id: id, quantity: 1 })),
+    ...mines.map(id => ({ kind: 'mine', ref_id: id, quantity: 1 })),
+    ...consumableRows,
+    ...achievementRows
+  ].map(row => ({ user_id: userId, ...row }));
 
   const { error: profileError } = await supabase
     .from('profiles')
@@ -816,36 +899,15 @@ async function saveCloudState(userId, body) {
     if (error) throw error;
   }
 
-  const { error: pickDeleteError } = await supabase.from('player_pickaxes').delete().eq('user_id', userId);
-  if (pickDeleteError) throw pickDeleteError;
-  const { error: pickInsertError } = await supabase
-    .from('player_pickaxes')
-    .insert(pickaxes.map(id => ({ user_id: userId, pickaxe_id: id })));
-  if (pickInsertError) throw pickInsertError;
-
-  const { error: mineDeleteError } = await supabase.from('player_mines').delete().eq('user_id', userId);
-  if (mineDeleteError) throw mineDeleteError;
-  const { error: mineInsertError } = await supabase
-    .from('player_mines')
-    .insert(mines.map(id => ({ user_id: userId, mine_id: id })));
-  if (mineInsertError) throw mineInsertError;
-
-  const { error: consDeleteError } = await supabase.from('player_consumables').delete().eq('user_id', userId);
-  if (consDeleteError) throw consDeleteError;
-  if (consumableRows.length) {
-    const { error } = await supabase.from('player_consumables').insert(consumableRows);
+  const { error: unlockDeleteError } = await supabase.from('player_unlocks').delete().eq('user_id', userId);
+  if (unlockDeleteError) throw unlockDeleteError;
+  if (unlockRows.length) {
+    const { error } = await supabase.from('player_unlocks').insert(unlockRows);
     if (error) throw error;
   }
 
   const { error: statsError } = await supabase.from('player_stats').upsert(statsRow, { onConflict: 'user_id' });
   if (statsError) throw statsError;
-
-  const { error: achDeleteError } = await supabase.from('player_achievements').delete().eq('user_id', userId);
-  if (achDeleteError) throw achDeleteError;
-  if (achievementRows.length) {
-    const { error } = await supabase.from('player_achievements').insert(achievementRows);
-    if (error) throw error;
-  }
 
   return { saved: true };
 }
@@ -964,7 +1026,8 @@ function createRoom(mine) {
     createdAt: Date.now(),
     lastActive: Date.now(),
     lastSnapshotAt: 0,
-    emptySince: Date.now()
+    emptySince: Date.now(),
+    chat: []
   };
   rooms.set(room.id, room);
   const total = Math.round(56 * ((mine.size.w * mine.size.h) / (2400 * 1600)));
@@ -1098,7 +1161,8 @@ async function joinMine(player, payload) {
     selfId: player.id,
     deposits: Array.from(room.deposits.values()),
     drops: Array.from(room.drops.values()).map(basicDrop),
-    players: Array.from(room.players.values()).map(player => basicPlayer(player, room))
+    players: Array.from(room.players.values()).map(player => basicPlayer(player, room)),
+    chat: room.chat.slice(-40)
   };
 }
 
@@ -1151,6 +1215,29 @@ async function leaveMine(player, reason) {
   player.sessionStartedAt = 0;
   emitPlayerUpdate(player);
   return { left: true };
+}
+
+function sanitizeChatText(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function sendChat(player, payload) {
+  const room = player.roomId ? rooms.get(player.roomId) : null;
+  if (!room) throw new GameError('not_in_mine', 409);
+  const text = sanitizeChatText(payload && payload.text);
+  if (!text) throw new GameError('invalid_payload');
+  const message = {
+    id: player.id + ':' + Date.now().toString(36),
+    username: player.username,
+    text,
+    ts: Date.now()
+  };
+  room.chat.push(message);
+  if (room.chat.length > 50) room.chat.splice(0, room.chat.length - 50);
+  room.lastActive = Date.now();
+  io.to(room.id).emit('chat:message', message);
+  return { sent: true };
 }
 
 function sanitizeInput(player, room, payload) {
@@ -1466,7 +1553,8 @@ async function applyMiningReward(player, room, drop) {
     p_mine_id: room.mine.id,
     p_quantity: 1,
     p_unit_value: oreUnitValue(drop.oreId, room.mine.id),
-    p_xp: oreXp(drop.oreId, room.mine)
+    p_xp: oreXp(drop.oreId, room.mine),
+    p_rarity_rank: ore.rarityRank
   });
   const row = firstRow(data);
   if (!row) throw new GameError('server_error');
@@ -1563,7 +1651,9 @@ async function purchasePickaxe(player, pickaxeId) {
   if (!pickaxe) throw new GameError('unknown_pickaxe');
   const data = await rpc('purchase_pickaxe', {
     p_user: player.id,
-    p_pickaxe_id: pickaxeId
+    p_pickaxe_id: pickaxeId,
+    p_price: pickaxe.price,
+    p_level_required: pickaxe.levelRequired
   });
   const row = firstRow(data);
   if (!row) throw new GameError('server_error');
@@ -1583,7 +1673,9 @@ async function unlockMine(player, mineId) {
   if (player.roomId) throw new GameError('mine_mismatch', 409);
   const data = await rpc('unlock_mine', {
     p_user: player.id,
-    p_mine_id: mineId
+    p_mine_id: mineId,
+    p_cost: mine.cost,
+    p_level_required: mine.levelRequired
   });
   const row = firstRow(data);
   if (!row) throw new GameError('server_error');
@@ -1602,7 +1694,8 @@ async function purchaseConsumable(player, consumableId) {
   if (!item) throw new GameError('unknown_consumable');
   const data = await rpc('purchase_consumable', {
     p_user: player.id,
-    p_consumable_id: consumableId
+    p_consumable_id: consumableId,
+    p_price: item.price
   });
   const row = firstRow(data);
   if (!row) throw new GameError('server_error');
@@ -1654,7 +1747,7 @@ function scheduleAchievements(player) {
 }
 
 async function checkAchievements(player) {
-  const data = await rpc('evaluate_achievements', { p_user: player.id });
+  const data = await rpc('evaluate_achievements', { p_user: player.id, p_defs: ACHIEVEMENT_DEFS_PAYLOAD });
   const rows = Array.isArray(data) ? data : (data ? [data] : []);
   if (!rows.length) return [];
   let rewardTotal = 0;
@@ -1734,8 +1827,15 @@ io.use(async (socket, next) => {
     const existing = activePlayers.get(user.id);
     if (existing) {
       const oldSocketId = existing.socketId;
-      existing.socketId = null;
       const oldSocket = oldSocketId ? io.sockets.sockets.get(oldSocketId) : null;
+      // One live session per account — a second tab/device is rejected
+      // while the first connection is still alive.
+      if (oldSocket && oldSocket.connected) {
+        const blocked = new Error('already_connected');
+        blocked.data = { code: 'already_connected' };
+        return next(blocked);
+      }
+      existing.socketId = null;
       if (oldSocket) {
         oldSocket.emit('session:replaced');
         oldSocket.disconnect(true);
@@ -1846,6 +1946,14 @@ io.on('connection', socket => {
       return;
     }
     handleAck(ack, enqueue(player, () => purchaseConsumable(player, payload && payload.consumableId)));
+  });
+
+  socket.on('chat:message', (payload, ack) => {
+    if (!rateLimit(player, 'chat', 8, 10000)) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'rate_limited' });
+      return;
+    }
+    handleAck(ack, enqueue(player, () => sendChat(player, payload)));
   });
 
   socket.on('player:username', (payload, ack) => {

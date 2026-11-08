@@ -431,6 +431,37 @@
   }
   .game-message.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
   .game-message.info{background:rgba(59,130,246,.16);border-color:rgba(96,165,250,.4);color:#bfdbfe}
+  .chat-box{
+    position:absolute;left:16px;bottom:88px;width:290px;z-index:12;
+    display:flex;flex-direction:column;gap:6px;pointer-events:none;
+  }
+  .chat-log{
+    display:flex;flex-direction:column;gap:4px;max-height:150px;overflow:hidden;
+    mask-image:linear-gradient(180deg,transparent,#000 26%);
+    -webkit-mask-image:linear-gradient(180deg,transparent,#000 26%);
+  }
+  .chat-msg{font-size:11.5px;line-height:1.35;color:#dbe4f5;text-shadow:0 1px 3px rgba(0,0,0,.8);word-break:break-word}
+  .chat-msg b{color:#93c5fd;font-weight:800}
+  .chat-msg .cm-time{color:#64748b;font-size:9.5px;margin-left:5px}
+  .chat-input{
+    pointer-events:auto;background:rgba(7,13,28,.78);border:1px solid rgba(96,165,250,.22);
+    border-radius:10px;padding:8px 11px;color:#e2e8f0;font:inherit;font-size:12px;font-weight:600;
+    outline:none;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  }
+  .chat-input:focus{border-color:rgba(96,165,250,.55)}
+  .chat-input::placeholder{color:#5b6b8c}
+  .session-overlay{
+    position:fixed;inset:0;z-index:200;background:rgba(3,7,16,.9);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    display:grid;place-items:center;
+  }
+  .session-panel{
+    width:min(400px,calc(100vw - 40px));background:linear-gradient(180deg,rgba(19,31,59,.97),rgba(9,16,33,.98));
+    border:1px solid var(--line2);border-radius:20px;padding:30px;text-align:center;
+    box-shadow:0 50px 120px rgba(0,0,0,.65);
+  }
+  .session-panel h2{font-size:22px;font-weight:900}
+  .session-panel p{font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.6}
   .pause-overlay{
     position:absolute;inset:0;z-index:30;background:rgba(3,7,16,.66);
     backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:grid;place-items:center;pointer-events:auto;
@@ -688,6 +719,10 @@
         <div class="mining-top"><span id="miningName">Coal</span><span id="miningPct">0%</span></div>
         <div class="mining-bar"><i id="miningFill"></i></div>
       </div>
+      <div class="chat-box" id="chatBox">
+        <div class="chat-log" id="chatLog"></div>
+        <input class="chat-input" id="chatInput" maxlength="200" placeholder="Message your fellow miners… (Enter)" autocomplete="off">
+      </div>
       <div class="game-message" id="gameMessage"></div>
     </div>
     <div class="pause-overlay hidden" id="pauseOverlay">
@@ -704,6 +739,12 @@
     </div>
   </div>
 
+  <div class="session-overlay hidden" id="sessionOverlay">
+    <div class="session-panel">
+      <h2>Already mining elsewhere</h2>
+      <p>This account is connected in another tab or device. Close it there to keep playing here — this page will connect automatically once it frees up.</p>
+    </div>
+  </div>
   <div id="modalRoot"></div>
   <div id="toastRoot"></div>
 
@@ -794,16 +835,37 @@ const RARITIES = {
 };
 
 const ORES = {
-  coal:     { id: 'coal',     name: 'Coal',     rarity: 'Common',    value: 7,   duration: 1.65, xp: 5,   color: '#5c6576', light: '#aab6c8', dark: '#22262f', glow: 0.22, crystals: 4 },
-  copper:   { id: 'copper',   name: 'Copper',   rarity: 'Uncommon',  value: 16,  duration: 2.25, xp: 9,   color: '#e08a4b', light: '#ffc58f', dark: '#7c3f18', glow: 0.34, crystals: 5 },
-  iron:     { id: 'iron',     name: 'Iron',     rarity: 'Rare',      value: 38,  duration: 3.05, xp: 17,  color: '#c3ccdb', light: '#f1f5fb', dark: '#5d6879', glow: 0.42, crystals: 5 },
-  gold:     { id: 'gold',     name: 'Gold',     rarity: 'Epic',      value: 95,  duration: 4.15, xp: 34,  color: '#f7c948', light: '#ffe9a3', dark: '#9a6c10', glow: 0.62, crystals: 6 },
-  sapphire: { id: 'sapphire', name: 'Sapphire', rarity: 'Legendary', value: 240, duration: 5.4,  xp: 62,  color: '#4d8dff', light: '#a5c8ff', dark: '#173a8f', glow: 0.82, crystals: 7 },
-  diamond:  { id: 'diamond',  name: 'Diamond',  rarity: 'Legendary', value: 340, duration: 5.95, xp: 82,  color: '#37e6f0', light: '#c4fbff', dark: '#0b7285', glow: 0.9,  crystals: 7 },
-  ruby:     { id: 'ruby',     name: 'Ruby',     rarity: 'Mythic',    value: 430, duration: 6.7,  xp: 104, color: '#ff4d6a', light: '#ffb3c0', dark: '#8f1029', glow: 1.0,  crystals: 8 },
-  emerald:  { id: 'emerald',  name: 'Emerald',  rarity: 'Mythic',    value: 450, duration: 6.85, xp: 108, color: '#3ce07a', light: '#b4ffcf', dark: '#116b38', glow: 1.0,  crystals: 8 }
+  limestone: { id: 'limestone', name: 'Limestone', rarity: 'Common',    value: 5,   duration: 1.4,  xp: 4,   color: '#b8b0a4', light: '#e8e2d6', dark: '#6b6357', glow: 0.18, crystals: 4 },
+  coal:      { id: 'coal',      name: 'Coal',      rarity: 'Common',    value: 7,   duration: 1.65, xp: 5,   color: '#5c6576', light: '#aab6c8', dark: '#22262f', glow: 0.22, crystals: 4 },
+  flint:     { id: 'flint',     name: 'Flint',     rarity: 'Common',    value: 10,  duration: 1.85, xp: 7,   color: '#7d8590', light: '#c3cad4', dark: '#3c434d', glow: 0.25, crystals: 5 },
+  copper:    { id: 'copper',    name: 'Copper',    rarity: 'Uncommon',  value: 16,  duration: 2.25, xp: 9,   color: '#e08a4b', light: '#ffc58f', dark: '#7c3f18', glow: 0.34, crystals: 5 },
+  tin:       { id: 'tin',       name: 'Tin',       rarity: 'Uncommon',  value: 24,  duration: 2.45, xp: 12,  color: '#b9c4d0', light: '#e6edf5', dark: '#5d6b7d', glow: 0.3,  crystals: 5 },
+  quartz:    { id: 'quartz',    name: 'Quartz',    rarity: 'Uncommon',  value: 30,  duration: 2.65, xp: 13,  color: '#d8c8f0', light: '#f2e9ff', dark: '#7a68a8', glow: 0.38, crystals: 6 },
+  iron:      { id: 'iron',      name: 'Iron',      rarity: 'Rare',      value: 38,  duration: 3.05, xp: 17,  color: '#c3ccdb', light: '#f1f5fb', dark: '#5d6879', glow: 0.42, crystals: 5 },
+  silver:    { id: 'silver',    name: 'Silver',    rarity: 'Rare',      value: 36,  duration: 2.85, xp: 15,  color: '#d7dee8', light: '#f4f8ff', dark: '#77839a', glow: 0.4,  crystals: 6 },
+  meteorite: { id: 'meteorite', name: 'Meteorite', rarity: 'Rare',      value: 58,  duration: 3.4,  xp: 21,  color: '#8a7f8f', light: '#c9bfd4', dark: '#453e4e', glow: 0.5,  crystals: 6 },
+  adamantite:{ id: 'adamantite',name: 'Adamantite',rarity: 'Rare',      value: 74,  duration: 3.75, xp: 25,  color: '#9fb4c8', light: '#d5e6f5', dark: '#47617a', glow: 0.55, crystals: 7 },
+  gold:      { id: 'gold',      name: 'Gold',      rarity: 'Epic',      value: 95,  duration: 4.15, xp: 34,  color: '#f7c948', light: '#ffe9a3', dark: '#9a6c10', glow: 0.62, crystals: 6 },
+  topaz:     { id: 'topaz',     name: 'Topaz',     rarity: 'Epic',      value: 150, duration: 4.6,  xp: 44,  color: '#f0b53f', light: '#ffe6a8', dark: '#8f6114', glow: 0.7,  crystals: 7 },
+  opal:      { id: 'opal',      name: 'Opal',      rarity: 'Epic',      value: 185, duration: 4.95, xp: 50,  color: '#9fe8d8', light: '#d8fff4', dark: '#3f8f80', glow: 0.75, crystals: 7 },
+  sapphire:  { id: 'sapphire',  name: 'Sapphire',  rarity: 'Legendary', value: 240, duration: 5.4,  xp: 62,  color: '#4d8dff', light: '#a5c8ff', dark: '#173a8f', glow: 0.82, crystals: 7 },
+  jade:      { id: 'jade',      name: 'Jade',      rarity: 'Legendary', value: 300, duration: 5.75, xp: 78,  color: '#3ecf8e', light: '#a9ffd9', dark: '#127a4c', glow: 0.85, crystals: 8 },
+  diamond:   { id: 'diamond',   name: 'Diamond',   rarity: 'Legendary', value: 340, duration: 5.95, xp: 82,  color: '#37e6f0', light: '#c4fbff', dark: '#0b7285', glow: 0.9,  crystals: 7 },
+  amber:     { id: 'amber',     name: 'Amber',     rarity: 'Legendary', value: 390, duration: 6.15, xp: 92,  color: '#ff9d45', light: '#ffd9a8', dark: '#9a5410', glow: 0.88, crystals: 8 },
+  ruby:      { id: 'ruby',      name: 'Ruby',      rarity: 'Mythic',    value: 430, duration: 6.7,  xp: 104, color: '#ff4d6a', light: '#ffb3c0', dark: '#8f1029', glow: 1.0,  crystals: 8 },
+  emerald:   { id: 'emerald',   name: 'Emerald',   rarity: 'Mythic',    value: 450, duration: 6.85, xp: 108, color: '#3ce07a', light: '#b4ffcf', dark: '#116b38', glow: 1.0,  crystals: 8 },
+  starsteel: { id: 'starsteel', name: 'Starsteel', rarity: 'Mythic',    value: 540, duration: 7.3,  xp: 124, color: '#a5b4fc', light: '#e0e7ff', dark: '#4338ca', glow: 0.95, crystals: 8 },
+  voidstone: { id: 'voidstone', name: 'Voidstone', rarity: 'Mythic',    value: 660, duration: 7.7,  xp: 140, color: '#7c5cd6', light: '#cdb9ff', dark: '#3b1d8f', glow: 1.0,  crystals: 9 },
+  celestium: { id: 'celestium', name: 'Celestium', rarity: 'Mythic',    value: 850, duration: 8.3,  xp: 165, color: '#7de3f4', light: '#c9f7ff', dark: '#0e7490', glow: 1.0,  crystals: 9 }
 };
-const ORE_ORDER = ['coal', 'copper', 'iron', 'gold', 'sapphire', 'diamond', 'ruby', 'emerald'];
+const ORE_ORDER = [
+  'limestone', 'coal', 'flint',
+  'copper', 'tin', 'quartz',
+  'iron', 'silver', 'meteorite', 'adamantite',
+  'gold', 'topaz', 'opal',
+  'sapphire', 'jade', 'diamond', 'amber',
+  'ruby', 'emerald', 'starsteel', 'voidstone', 'celestium'
+];
 
 const PICKAXES = [
   { id: 'basic',    name: 'Basic Pickaxe',    price: 0,     speed: 1.0,  level: 1,  color: '#94a3b8', accent: '#64748b', desc: 'A trusty starter pick. Slow but steady.' },
@@ -821,35 +883,70 @@ const MINES = [
     desc: 'A damp, forgotten mine where copper glints through moss and old timber.',
     accent: '#34d399', m1: 'rgba(52,211,153,.42)', m2: 'rgba(59,130,246,.28)', theme: 'mossy',
     floor: '#15212a', floor2: '#1b2b33', wall: '#101a24', size: { w: 2400, h: 1600 },
-    weights: { coal: 100, copper: 58, iron: 18, gold: 3.2, sapphire: 0.5, diamond: 0.16, ruby: 0.04, emerald: 0.04 }
+    weights: {
+      limestone: 140, coal: 100, flint: 72,
+      copper: 55, tin: 34, quartz: 22,
+      iron: 17, silver: 9, meteorite: 3.5, adamantite: 1.4,
+      gold: 3.2, topaz: 1.1, opal: 0.5,
+      sapphire: 0.5, jade: 0.2, diamond: 0.16, amber: 0.1,
+      ruby: 0.04, emerald: 0.04, starsteel: 0.02, voidstone: 0.01, celestium: 0.005
+    }
   },
   {
     id: 'crystal', name: 'Crystal Cavern', level: 3, cost: 500, tier: 2, valueMult: 1.6,
     desc: 'Vast blue chambers humming with crystal growth and cold, clear air.',
     accent: '#38bdf8', m1: 'rgba(56,189,248,.5)', m2: 'rgba(99,102,241,.32)', theme: 'crystal',
     floor: '#111d2e', floor2: '#172842', wall: '#0b1524', size: { w: 2600, h: 1700 },
-    weights: { coal: 55, copper: 75, iron: 48, gold: 11, sapphire: 3.4, diamond: 1.5, ruby: 0.45, emerald: 0.4 }
+    weights: {
+      limestone: 85, coal: 55, flint: 58,
+      copper: 78, tin: 55, quartz: 42,
+      iron: 45, silver: 26, meteorite: 8, adamantite: 4,
+      gold: 12, topaz: 5.5, opal: 2.8,
+      sapphire: 3.4, jade: 1.6, diamond: 1.5, amber: 0.9,
+      ruby: 0.45, emerald: 0.4, starsteel: 0.12, voidstone: 0.06, celestium: 0.03
+    }
   },
   {
     id: 'ember', name: 'Ember Depths', level: 7, cost: 2200, tier: 3, valueMult: 2.4,
     desc: 'Heat rolls off the walls. Molten seams glow between ancient basalt.',
     accent: '#fb923c', m1: 'rgba(251,146,60,.5)', m2: 'rgba(239,68,68,.32)', theme: 'ember',
     floor: '#241719', floor2: '#33201f', wall: '#180e10', size: { w: 2700, h: 1750 },
-    weights: { coal: 32, copper: 55, iron: 70, gold: 24, sapphire: 6, diamond: 3.2, ruby: 1.8, emerald: 1.2 }
+    weights: {
+      limestone: 50, coal: 32, flint: 42,
+      copper: 60, tin: 62, quartz: 55,
+      iron: 70, silver: 42, meteorite: 16, adamantite: 9,
+      gold: 26, topaz: 13, opal: 7,
+      sapphire: 6, jade: 3.6, diamond: 3.2, amber: 2.2,
+      ruby: 1.8, emerald: 1.2, starsteel: 0.45, voidstone: 0.22, celestium: 0.1
+    }
   },
   {
     id: 'frost', name: 'Frostbite Abyss', level: 12, cost: 7500, tier: 4, valueMult: 3.6,
     desc: 'A frozen wound in the earth. Ice-locked gems shimmer in the dark.',
     accent: '#7dd3fc', m1: 'rgba(125,211,252,.5)', m2: 'rgba(129,140,248,.3)', theme: 'frost',
     floor: '#101c2b', floor2: '#182b3f', wall: '#0a121d', size: { w: 2800, h: 1800 },
-    weights: { coal: 16, copper: 34, iron: 62, gold: 34, sapphire: 13, diamond: 7, ruby: 3.6, emerald: 3.2 }
+    weights: {
+      limestone: 28, coal: 16, flint: 32,
+      copper: 40, tin: 48, quartz: 60,
+      iron: 62, silver: 55, meteorite: 26, adamantite: 16,
+      gold: 36, topaz: 22, opal: 13,
+      sapphire: 13, jade: 9, diamond: 7, amber: 5,
+      ruby: 3.6, emerald: 3.2, starsteel: 1.4, voidstone: 0.8, celestium: 0.4
+    }
   },
   {
     id: 'void', name: 'Voidreach', level: 18, cost: 25000, tier: 5, valueMult: 5.5,
     desc: 'The deepest cut. Reality frays at the edges, and mythic ore sings.',
     accent: '#c084fc', m1: 'rgba(192,132,252,.52)', m2: 'rgba(244,114,182,.32)', theme: 'void',
     floor: '#1a1228', floor2: '#241a38', wall: '#100a1b', size: { w: 2900, h: 1850 },
-    weights: { coal: 8, copper: 18, iron: 46, gold: 48, sapphire: 26, diamond: 16, ruby: 9, emerald: 8 }
+    weights: {
+      limestone: 12, coal: 8, flint: 18,
+      copper: 22, tin: 34, quartz: 55,
+      iron: 46, silver: 60, meteorite: 42, adamantite: 32,
+      gold: 50, topaz: 38, opal: 24,
+      sapphire: 26, jade: 20, diamond: 16, amber: 12,
+      ruby: 9, emerald: 8, starsteel: 4.5, voidstone: 3.2, celestium: 2
+    }
   }
 ];
 
@@ -1268,6 +1365,44 @@ function mpDropFromServer(d) {
   };
 }
 
+function mpChatAdd(msg) {
+  const log = $('#chatLog');
+  if (!log || !msg) return;
+  const el = document.createElement('div');
+  el.className = 'chat-msg';
+  const b = document.createElement('b');
+  b.textContent = msg.username || 'Miner';
+  el.appendChild(b);
+  el.appendChild(document.createTextNode(' ' + (msg.text || '')));
+  if (msg.ts) {
+    const d = new Date(msg.ts);
+    const s = document.createElement('span');
+    s.className = 'cm-time';
+    s.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    el.appendChild(s);
+  }
+  log.appendChild(el);
+  while (log.children.length > 40) log.removeChild(log.firstChild);
+}
+
+function mpChatClear() {
+  const log = $('#chatLog');
+  if (log) log.innerHTML = '';
+}
+
+const chatInputEl = $('#chatInput');
+if (chatInputEl) {
+  chatInputEl.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const text = chatInputEl.value.trim();
+    if (!text) return;
+    if (mp.socket && mp.socket.connected && mp.roomId) {
+      mp.socket.emit('chat:message', { text }, () => { chatInputEl.value = ''; chatInputEl.blur(); });
+    }
+  });
+}
+
 function mpSnapshot(snap) {
   if (!snap) return;
   for (const p of snap.players || []) {
@@ -1350,7 +1485,14 @@ async function mpConnectInner() {
   mp.socket = s;
 
   s.on('connect_error', async (err) => {
-    if (err && /unauthorized|invalid/i.test(String(err.message || ''))) {
+    const overlay = $('#sessionOverlay');
+    const code = String((err && err.data && err.data.code) || (err && err.message) || '');
+    if (code === 'already_connected') {
+      if (overlay) overlay.classList.remove('hidden');
+      return;
+    }
+    if (overlay) overlay.classList.add('hidden');
+    if (/unauthorized|invalid/i.test(code)) {
       if (await refreshSession()) void mpConnect();
       else if (game.active) showGameMessage('Connection lost — log in again', 'info');
     } else if (game.active) {
@@ -1358,6 +1500,8 @@ async function mpConnectInner() {
     }
   });
   s.on('connect', () => {
+    const overlay = $('#sessionOverlay');
+    if (overlay) overlay.classList.add('hidden');
     if (game.active && game.mine && !mp.roomId && !mp.joinPending) void mpJoinRoom(game.mine.id);
   });
   s.on('session:ready', (data) => {
@@ -1381,6 +1525,7 @@ async function mpConnectInner() {
   s.on('drop:removed', (data) => {
     if (data && data.dropId) game.drops = game.drops.filter(d => d.id !== data.dropId);
   });
+  s.on('chat:message', (msg) => { if (msg) mpChatAdd(msg); });
   s.on('inventory:full', () => showGameMessage('Inventory full — sell ores to make room'));
   s.on('achievement:unlocked', (a) => {
     toast('Achievement Unlocked', (a && a.name) || 'Done', 'gold', 'trophy');
@@ -1408,6 +1553,8 @@ async function mpJoinRoom(mineId) {
       mp.remotePlayers.clear();
       for (const p of ack.players || []) mpRemoteUpsert(p);
       mp.selfServer = null;
+      mpChatClear();
+      if (Array.isArray(ack.chat)) for (const m of ack.chat) mpChatAdd(m);
       renderHotbar();
       updateBuffChips();
     });
@@ -1446,6 +1593,7 @@ function mpLeaveRoom() {
   mp.selfServer = null;
   mp.joinPending = null;
   mp.remotePlayers.clear();
+  mpChatClear();
 }
 
 // ============================================================
@@ -2461,6 +2609,7 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
   if (e.key === 'Escape') {
     const modal = $('#modalRoot');
     if (modal && modal.innerHTML) { closeModal(); return; }
@@ -2612,6 +2761,7 @@ function initGameCanvas() {
 
   window.addEventListener('keydown', (e) => {
     if (!game.active || game.paused) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     const k = e.key.toLowerCase();
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) game.keys.add(k);
@@ -2622,6 +2772,7 @@ function initGameCanvas() {
   });
   window.addEventListener('keyup', (e) => {
     if (!game.active) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     game.keys.delete(e.key.toLowerCase());
   });
 
