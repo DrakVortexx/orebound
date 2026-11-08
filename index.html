@@ -707,6 +707,7 @@
   <div id="modalRoot"></div>
   <div id="toastRoot"></div>
 
+<script src="/socket.io/socket.io.js"></script>
 <script>
 (() => {
 "use strict";
@@ -1117,13 +1118,12 @@ function applyRemotePlayer(p) {
 }
 
 function cloudSave() {
-  if (!cloudReady || !state) return;
-  api('/api/state', { method: 'POST', body: stateToRemote() }).catch(() => {});
+  // Progress is server-authoritative now: mining rewards, sales, and
+  // purchases all go through the game's RPC-backed endpoints, so the
+  // generic state push is only used for an explicit account reset.
 }
 function cloudSaveSoon() {
-  if (!cloudReady) return;
-  clearTimeout(cloudSaveTimer);
-  cloudSaveTimer = setTimeout(cloudSave, 4000);
+  // no-op: saves happen server-side via gameplay endpoints
 }
 
 const LB_COLORS = ['#3b82f6', '#a855f7', '#ec4899', '#22d3ee', '#64748b', '#f59e0b', '#10b981', '#f97316', '#8b5cf6', '#ef4444'];
@@ -1144,6 +1144,7 @@ async function enterCloud() {
   }
   cloudReady = true;
   fetchLeaderboard();
+  void mpConnect();
 }
 
 // ---------- auth UI ----------
@@ -1195,6 +1196,257 @@ const authForm = $('#authForm');
 if (authTabLogin) authTabLogin.addEventListener('click', () => setAuthMode('login'));
 if (authTabSignup) authTabSignup.addEventListener('click', () => setAuthMode('signup'));
 if (authForm) authForm.addEventListener('submit', submitAuth);
+
+// ============================================================
+// MULTIPLAYER — shared mine rooms (server-authoritative)
+// ============================================================
+const mp = {
+  socket: null,
+  roomId: null,
+  selfId: null,
+  seq: 0,
+  lastInput: 0,
+  lastRefresh: 0,
+  remotePlayers: new Map(),
+  selfServer: null,
+  connecting: null,
+  joinPending: null
+};
+
+function mpRemoteUpsert(p) {
+  if (!p || !p.id || p.id === meUserId || p.id === mp.selfId) return;
+  const rp = mp.remotePlayers.get(p.id) || { id: p.id, walk: 0, x: p.x, y: p.y, tx: p.x, ty: p.y };
+  Object.assign(rp, p, { tx: p.x, ty: p.y });
+  mp.remotePlayers.set(p.id, rp);
+}
+
+function onServerPlayer(p) {
+  if (!p) return;
+  const prevLevel = state.level;
+  applyRemotePlayer(p);
+  if (p.buffs && game.active) {
+    game.buffs.tonicUntil = Number(p.buffs.tonicUntil) || 0;
+    game.buffs.magnetUntil = Number(p.buffs.magnetUntil) || 0;
+    game.buffs.charmUntil = Number(p.buffs.charmUntil) || 0;
+  }
+  syncUI();
+  if (state.level > prevLevel && prevLevel > 0) {
+    Sound.levelUp();
+    toast('Level Up!', `You are now level ${state.level}.`, 'gold', 'level');
+    if (game.active && addLevelBurst) addLevelBurst();
+  }
+}
+
+async function mpRefresh() {
+  if (!cloudReady) return;
+  try {
+    const d = await api('/api/me');
+    if (d && d.player) onServerPlayer(d.player);
+  } catch { /* ignore */ }
+}
+function mpRefreshSoon() {
+  const now = Date.now();
+  if (now - mp.lastRefresh < 400) return;
+  mp.lastRefresh = now;
+  void mpRefresh();
+}
+
+function mpDepositFromServer(d) {
+  return {
+    id: d.id, x: d.x, y: d.y, r: d.r, oreId: d.oreId || null,
+    active: !!d.active, progress: Number(d.progress) || 0,
+    hit: 0, seed: hashStr('dep' + d.id) >>> 0, phase: rand(0, TAU), rot: rand(-0.35, 0.35),
+    scale: d.active ? 1 : 0, respawnAtMs: Number(d.respawnAt) || 0
+  };
+}
+
+function mpDropFromServer(d) {
+  return {
+    id: d.id, x: d.x, y: d.y, tx: d.x, ty: d.y,
+    oreId: d.oreId, value: d.value, age: d.age || 0,
+    r: rand(9, 12), bob: rand(0, TAU), vx: 0, vy: 0
+  };
+}
+
+function mpSnapshot(snap) {
+  if (!snap) return;
+  for (const p of snap.players || []) {
+    if (p.id === mp.selfId || p.id === meUserId) {
+      mp.selfServer = { x: p.x, y: p.y };
+      continue;
+    }
+    mpRemoteUpsert(p);
+  }
+  for (const d of snap.drops || []) {
+    let drop = game.drops.find(x => x.id === d.id);
+    if (!drop) {
+      drop = { id: d.id, r: rand(9, 12), bob: rand(0, TAU), vx: 0, vy: 0, age: 0 };
+      game.drops.push(drop);
+      if (game.drops.length > 180) game.drops.splice(0, game.drops.length - 180);
+    }
+    drop.tx = d.x; drop.ty = d.y;
+    drop.x = drop.x === undefined ? d.x : drop.x;
+    drop.y = drop.y === undefined ? d.y : drop.y;
+    drop.oreId = d.oreId;
+    drop.value = d.value;
+    drop.age = d.age || drop.age;
+  }
+}
+
+function mpDepositBroken(data) {
+  const d = game.deposits.find(x => x.id === data.id);
+  if (!d) return;
+  d.active = false;
+  d.progress = 0;
+  d.hit = 0;
+  d.respawnAtMs = Number(data.respawnAt) || 0;
+  spawnBreakParticles(d);
+  Sound.breakOre();
+  if (state.settings.shake) game.camera.shake = Math.min(7, game.camera.shake + 3);
+  if (d.oreId) addFloater(d.x, d.y - d.r - 14, (ORES[d.oreId] || {}).name || 'Ore', (ORES[d.oreId] || {}).color || '#cbd5e1', 1.0);
+  mpRefreshSoon();
+}
+
+function mpDepositRespawn(data) {
+  let d = game.deposits.find(x => x.id === data.id);
+  if (!d) {
+    d = mpDepositFromServer({ id: data.id, x: data.x, y: data.y, r: data.r, oreId: data.oreId, active: true });
+    game.deposits.push(d);
+    return;
+  }
+  d.x = data.x; d.y = data.y; d.r = data.r || d.r;
+  d.oreId = data.oreId || null;
+  d.active = true; d.progress = 0; d.hit = 0; d.scale = 0; d.respawnAtMs = 0;
+}
+
+function mpDropCollected(data) {
+  const idx = game.drops.findIndex(x => x.id === data.dropId);
+  const drop = idx >= 0 ? game.drops[idx] : null;
+  if (idx >= 0) game.drops.splice(idx, 1);
+  if (data.by === mp.selfId) {
+    const ore = ORES[data.oreId];
+    if (drop) {
+      spawnPickupParticles(drop.x, drop.y, ore || ORES.coal);
+      if (ore) addFloater(drop.x, drop.y - 18, `+1 ${ore.name}`, ore.color, 0.9);
+    }
+    game.session.ores += 1;
+    Sound.pickup();
+    mpRefreshSoon();
+  }
+}
+
+async function mpConnect() {
+  if (mp.connecting) return mp.connecting;
+  if (mp.socket) return mp.socket;
+  mp.connecting = mpConnectInner().finally(() => { mp.connecting = null; });
+  return mp.connecting;
+}
+
+async function mpConnectInner() {
+  const token = await getToken();
+  if (!token) throw new Error('unauthorized');
+  if (mp.socket) { try { mp.socket.disconnect(); } catch { /* ignore */ } }
+  const s = io({ auth: { token }, transports: ['websocket', 'polling'] });
+  mp.socket = s;
+
+  s.on('connect_error', async (err) => {
+    if (err && /unauthorized|invalid/i.test(String(err.message || ''))) {
+      if (await refreshSession()) void mpConnect();
+      else if (game.active) showGameMessage('Connection lost — log in again', 'info');
+    } else if (game.active) {
+      showGameMessage('Connection problem — retrying', 'info');
+    }
+  });
+  s.on('connect', () => {
+    if (game.active && game.mine && !mp.roomId && !mp.joinPending) void mpJoinRoom(game.mine.id);
+  });
+  s.on('session:ready', (data) => {
+    if (data && data.player) onServerPlayer(data.player);
+  });
+  s.on('session:replaced', () => {
+    toast('Session replaced', 'You connected from another device.', 'gold');
+    if (game.active) exitGame(false);
+  });
+  s.on('disconnect', (reason) => {
+    // Server kicked us (session replaced elsewhere) — don't auto-reconnect.
+    if (reason === 'io server disconnect') mp.socket = null;
+  });
+  s.on('player:update', (data) => { if (data && data.player) onServerPlayer(data.player); });
+  s.on('player:joined', (data) => { if (data && data.player) mpRemoteUpsert(data.player); });
+  s.on('player:left', (data) => { if (data && data.id) mp.remotePlayers.delete(data.id); });
+  s.on('room:snapshot', (data) => { if (mp.roomId && data && data.roomId === mp.roomId) mpSnapshot(data); });
+  s.on('deposit:broken', (data) => { if (data && data.id) mpDepositBroken(data); });
+  s.on('deposit:respawn', (data) => { if (data && data.id) mpDepositRespawn(data); });
+  s.on('drop:collected', (data) => { if (data && data.dropId) mpDropCollected(data); });
+  s.on('drop:removed', (data) => {
+    if (data && data.dropId) game.drops = game.drops.filter(d => d.id !== data.dropId);
+  });
+  s.on('inventory:full', () => showGameMessage('Inventory full — sell ores to make room'));
+  s.on('achievement:unlocked', (a) => {
+    toast('Achievement Unlocked', (a && a.name) || 'Done', 'gold', 'trophy');
+    mpRefreshSoon();
+  });
+  return s;
+}
+
+async function mpJoinRoom(mineId) {
+  try {
+    const s = await mpConnect();
+    if (mp.roomId) return;
+    mp.joinPending = mineId;
+    s.emit('mine:join', { mineId }, (ack) => {
+      mp.joinPending = null;
+      if (!ack || !ack.ok) {
+        toast('Cannot enter mine', authErrText(ack && ack.error), 'red', 'x');
+        exitGame(false);
+        return;
+      }
+      mp.roomId = ack.roomId;
+      mp.selfId = ack.selfId;
+      game.deposits = (ack.deposits || []).map(mpDepositFromServer);
+      game.drops = (ack.drops || []).map(mpDropFromServer);
+      mp.remotePlayers.clear();
+      for (const p of ack.players || []) mpRemoteUpsert(p);
+      mp.selfServer = null;
+      renderHotbar();
+      updateBuffChips();
+    });
+  } catch (e) {
+    mp.joinPending = null;
+    toast('Cannot enter mine', authErrText(e.code || e.message), 'red', 'x');
+    exitGame(false);
+  }
+}
+
+function mpSendInput() {
+  if (!mp.socket || !mp.socket.connected || !mp.roomId) return;
+  const now = Date.now();
+  if (now - mp.lastInput < 50) return;
+  mp.lastInput = now;
+  mp.seq += 1;
+  const k = game.keys;
+  mp.socket.emit('mine:input', {
+    up: k.has('w') || k.has('arrowup'),
+    down: k.has('s') || k.has('arrowdown'),
+    left: k.has('a') || k.has('arrowleft'),
+    right: k.has('d') || k.has('arrowright'),
+    aimX: game.mouse.wx,
+    aimY: game.mouse.wy,
+    mining: !!(game.mouse.down && !game.paused),
+    seq: mp.seq
+  });
+}
+
+function mpLeaveRoom() {
+  if (mp.socket && mp.socket.connected && mp.roomId) {
+    try { mp.socket.emit('mine:leave', {}, () => {}); } catch { /* ignore */ }
+  }
+  mp.roomId = null;
+  mp.selfId = null;
+  mp.selfServer = null;
+  mp.joinPending = null;
+  mp.remotePlayers.clear();
+}
 
 // ============================================================
 // AUDIO (synthesized, no external files)
@@ -1294,27 +1546,38 @@ function addOre(oreId, mineId, qty = 1) {
   saveSoon();
 }
 
-function sellStacks(entries) {
+async function serverAction(path, body, opts = {}) {
+  try {
+    const d = await api(path, { method: 'POST', body });
+    if (d && d.player) applyRemotePlayer(d.player);
+    syncUI();
+    if (!opts.noRender) renderView(ui.view);
+    return d;
+  } catch (e) {
+    toast('Action failed', authErrText(e.code || e.message), 'red', 'x');
+    Sound.error();
+    return null;
+  }
+}
+
+async function sellStacks(entries) {
   let total = 0, count = 0;
   for (const entry of entries) {
-    const idx = state.inventory.findIndex(s => stackKey(s) === entry.key);
-    if (idx < 0) continue;
-    const stack = state.inventory[idx];
+    const stack = state.inventory.find(s => stackKey(s) === entry.key);
+    if (!stack) continue;
     const qty = entry.qty === 'all' ? stack.qty : Math.min(entry.qty, stack.qty);
     if (qty <= 0) continue;
-    total += qty * stack.value;
-    count += qty;
-    stack.qty -= qty;
-    if (stack.qty <= 0) state.inventory.splice(idx, 1);
+    const d = await serverAction('/api/inventory/sell', {
+      oreId: stack.oreId, mineId: stack.mineId, quantity: qty
+    }, { noRender: true });
+    if (!d) continue;
+    total += Math.max(0, Number(d.total) || 0);
+    count += Math.max(0, Number(d.sold) || 0);
   }
   if (count > 0) {
-    state.coins += total;
-    state.stats.coinsEarned += total;
-    state.stats.oresSold += count;
     Sound.coin();
-    checkAchievements();
-    saveSoon();
     syncUI();
+    renderView(ui.view);
   }
   return { total, count };
 }
@@ -1361,68 +1624,46 @@ function checkAchievements() {
   return newly;
 }
 
-function buyPickaxe(pick) {
+async function buyPickaxe(pick) {
   if (state.pickaxes.includes(pick.id)) { equipPickaxe(pick.id); return false; }
-  if (state.level < pick.level) { toast('Locked', `Requires level ${pick.level}.`, 'red', 'lock'); Sound.error(); return false; }
-  if (state.coins < pick.price) { toast('Not enough coins', `You need ${fmt(pick.price - state.coins)} more.`, 'red', 'coin'); Sound.error(); return false; }
-  state.coins -= pick.price;
-  state.stats.coinsSpent += pick.price;
-  state.pickaxes.push(pick.id);
-  state.equippedPickaxe = pick.id;
+  const d = await serverAction('/api/pickaxe/buy', { pickaxeId: pick.id });
+  if (!d) return false;
   Sound.buy();
   toast('Pickaxe Purchased', `${pick.name} equipped.`, 'green', 'pick');
-  checkAchievements();
-  saveGame();
-  syncUI();
   return true;
 }
 
-function equipPickaxe(id) {
-  if (!state.pickaxes.includes(id)) return;
-  state.equippedPickaxe = id;
+async function equipPickaxe(id) {
+  if (!state.pickaxes.includes(id)) return false;
+  const d = await serverAction('/api/pickaxe/equip', { pickaxeId: id });
+  if (!d) return false;
   Sound.ui();
   toast('Pickaxe Equipped', getPickaxe(id).name, 'green', 'pick');
-  saveSoon();
-  syncUI();
-}
-
-function unlockMine(mine) {
-  if (state.minesUnlocked.includes(mine.id)) { selectMine(mine.id); return false; }
-  if (state.level < mine.level) { toast('Mine Locked', `Requires level ${mine.level}.`, 'red', 'lock'); Sound.error(); return false; }
-  if (state.coins < mine.cost) { toast('Not enough coins', `You need ${fmt(mine.cost - state.coins)} more.`, 'red', 'coin'); Sound.error(); return false; }
-  state.coins -= mine.cost;
-  state.stats.coinsSpent += mine.cost;
-  state.minesUnlocked.push(mine.id);
-  state.currentMine = mine.id;
-  Sound.buy();
-  toast('Mine Unlocked', `${mine.name} is now available.`, 'green', 'map');
-  checkAchievements();
-  saveGame();
-  syncUI();
   return true;
 }
 
-function selectMine(id) {
-  if (!state.minesUnlocked.includes(id)) return;
-  state.currentMine = id;
-  Sound.ui();
-  saveSoon();
-  syncUI();
+async function unlockMine(mine) {
+  if (state.minesUnlocked.includes(mine.id)) { selectMine(mine.id); return false; }
+  const d = await serverAction('/api/mine/unlock', { mineId: mine.id });
+  if (!d) return false;
+  Sound.buy();
+  toast('Mine Unlocked', `${mine.name} is now available.`, 'green', 'map');
+  return true;
 }
 
-function buySupply(supply) {
-  if (state.coins < supply.price) {
-    toast('Not enough coins', `You need ${fmt(supply.price - state.coins)} more.`, 'red', 'coin');
-    Sound.error();
-    return false;
-  }
-  state.coins -= supply.price;
-  state.stats.coinsSpent += supply.price;
-  state.consumables[supply.id] = (state.consumables[supply.id] || 0) + 1;
+async function selectMine(id) {
+  if (!state.minesUnlocked.includes(id)) return false;
+  const d = await serverAction('/api/mine/select', { mineId: id });
+  if (!d) return false;
+  Sound.ui();
+  return true;
+}
+
+async function buySupply(supply) {
+  const d = await serverAction('/api/consumable/buy', { consumableId: supply.id });
+  if (!d) return false;
   Sound.buy();
   toast('Supply Purchased', `${supply.name} added to your hotbar.`, 'green', 'bolt');
-  saveSoon();
-  syncUI();
   return true;
 }
 
@@ -1616,7 +1857,7 @@ function syncUI() {
     $('#hudLevel').textContent = state.level;
     const need = xpNeeded(state.level);
     $('#hudXpFill').style.width = clamp((state.xp / need) * 100, 0, 100) + '%';
-    $('#hudMine').textContent = currentMine().name;
+    $('#hudMine').textContent = currentMine().name + (mp.roomId ? ` · ${mp.remotePlayers.size} miner${mp.remotePlayers.size === 1 ? '' : 's'}` : '');
     updateInvMeter();
     if (game.active) { renderHotbar(); updateBuffChips(); }
   }
@@ -2081,15 +2322,19 @@ function confirmReset() {
       { label: 'Cancel', cls: 'ghost', onClick: closeModal },
       {
         label: 'Reset Save', cls: 'danger', onClick: () => {
-          localStorage.removeItem(SAVE_KEY);
-          if (game.active) exitGame(false);
-          state = defaultState();
-          saveGame();
-          ui.selected.clear();
-          closeModal();
-          renderView('home');
-          syncUI();
-          toast('Save Reset', 'A fresh start awaits.', 'green', 'reset');
+          void (async () => {
+            try { await api('/api/state', { method: 'POST', body: {} }); } catch { /* ignore */ }
+            localStorage.removeItem(SAVE_KEY);
+            if (game.active) exitGame(false);
+            state = defaultState();
+            saveGame();
+            ui.selected.clear();
+            closeModal();
+            renderView('home');
+            syncUI();
+            toast('Save Reset', 'A fresh start awaits.', 'green', 'reset');
+            void mpRefresh();
+          })();
         }
       }
     ]
@@ -2125,33 +2370,36 @@ document.addEventListener('click', (e) => {
   if (action === 'shop-tab') { ui.shopTab = el.dataset.tab; renderShop(); Sound.ui(); return; }
   if (action === 'sell-one' || action === 'sell-stack') {
     const key = el.dataset.key;
-    const res = sellStacks([{ key, qty: action === 'sell-one' ? 1 : 'all' }]);
-    if (res.count) {
-      toast('Ore Sold', `+${fmt(res.total)} coins`, 'gold', 'coin');
-      renderInventory();
-    }
+    void sellStacks([{ key, qty: action === 'sell-one' ? 1 : 'all' }]).then(res => {
+      if (res && res.count) {
+        toast('Ore Sold', `+${fmt(res.total)} coins`, 'gold', 'coin');
+        renderInventory();
+      }
+    });
     return;
   }
   if (action === 'sell-selected') {
     const entries = Array.from(ui.selected).map(key => ({ key, qty: 'all' }));
     if (!entries.length) return;
-    const res = sellStacks(entries);
-    ui.selected.clear();
-    if (res.count) {
-      toast('Ores Sold', `+${fmt(res.total)} coins`, 'gold', 'coin');
-      renderInventory();
-    }
+    void sellStacks(entries).then(res => {
+      ui.selected.clear();
+      if (res && res.count) {
+        toast('Ores Sold', `+${fmt(res.total)} coins`, 'gold', 'coin');
+        renderInventory();
+      }
+    });
     return;
   }
   if (action === 'sell-all') {
     const entries = state.inventory.map(s => ({ key: stackKey(s), qty: 'all' }));
     if (!entries.length) return;
-    const res = sellStacks(entries);
-    ui.selected.clear();
-    if (res.count) {
-      toast('Inventory Sold', `+${fmt(res.total)} coins from ${res.count} ores`, 'gold', 'coin');
-      renderInventory();
-    }
+    void sellStacks(entries).then(res => {
+      ui.selected.clear();
+      if (res && res.count) {
+        toast('Inventory Sold', `+${fmt(res.total)} coins from ${res.count} ores`, 'gold', 'coin');
+        renderInventory();
+      }
+    });
     return;
   }
   if (action === 'buy-pickaxe') { confirmPickaxe(el.dataset.id); return; }
@@ -2160,7 +2408,7 @@ document.addEventListener('click', (e) => {
   if (action === 'select-mine') { selectMine(el.dataset.id); renderShop(); return; }
   if (action === 'buy-supply') {
     const s = getSupply(el.dataset.id);
-    if (s && buySupply(s)) renderShop();
+    if (s) void buySupply(s);
     return;
   }
   if (action === 'toggle-setting') {
@@ -2273,7 +2521,10 @@ function tickEvents() {
   if (!state.events.nextAt) state.events.nextAt = now + randInt(25000, 45000);
 
   if (now >= state.events.nextAt) {
-    if (state.events.active.length < 2) {
+    // Events are cosmetic only in multiplayer — loot is decided server-side.
+    if (cloudReady) {
+      state.events.nextAt = now + 120000;
+    } else if (state.events.active.length < 2) {
       if (startRandomEvent()) changed = true;
     } else {
       state.events.nextAt = now + 60000;
@@ -2419,12 +2670,11 @@ function enterMine() {
   game.buffs = { tonicUntil: 0, magnetUntil: 0, charmUntil: 0 };
   game.selectedSlot = 0;
   game.session = { ores: 0, coins: 0, start: Date.now() };
-  state.stats.sessions += 1;
-  saveSoon();
+  game.deposits = [];
+  game.drops = [];
 
   generateFloor();
   generateProps();
-  generateDeposits();
   resizeCanvas();
 
   game.camera.x = clamp(game.player.x - game.W / 2, 0, Math.max(0, game.worldW - game.W));
@@ -2439,6 +2689,7 @@ function enterMine() {
   syncUI();
   game.last = performance.now();
   if (!game.raf) game.raf = requestAnimationFrame(loop);
+  void mpJoinRoom(mine.id);
 }
 
 function exitGame(showDash = true) {
@@ -2446,6 +2697,10 @@ function exitGame(showDash = true) {
   game.paused = false;
   game.mouse.down = false;
   game.keys.clear();
+  mpLeaveRoom();
+  game.deposits = [];
+  game.drops = [];
+  mp.remotePlayers.clear();
   if (game.raf) { cancelAnimationFrame(game.raf); game.raf = 0; }
   const overlay = $('#pauseOverlay');
   if (overlay) overlay.classList.add('hidden');
@@ -2492,7 +2747,7 @@ function showScreen(name) {
 // ============================================================
 function generateFloor() {
   const mine = game.mine, W = game.worldW, H = game.worldH;
-  const seed = (Date.now() ^ hashStr(mine.id)) >>> 0;
+  const seed = hashStr(mine.id) >>> 0;
   const rng = mulberry32(seed);
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
@@ -2768,7 +3023,7 @@ function findOpenSpot(r, avoidSpawn = 200) {
 
 function generateProps() {
   const mine = game.mine, W = game.worldW, H = game.worldH;
-  const rng = mulberry32((Date.now() ^ hashStr(mine.id + '-props')) >>> 0);
+  const rng = mulberry32(hashStr(mine.id + '-props') >>> 0);
   const props = [];
   const spawnX = W / 2, spawnY = H / 2;
   const spot = (rad) => {
@@ -2794,6 +3049,9 @@ function generateProps() {
   add('stalagmite', 13, 15, true);
   add('cluster', 16, 10, false);
   add('beam', 4, 12, false);
+  // Props are decorative only — the server doesn't collide with them,
+  // so keeping them solid would desync positions near props.
+  if (cloudReady) for (const pr of props) pr.solid = false;
   game.props = props;
 }
 
@@ -2854,11 +3112,21 @@ function update(dt) {
   game.mouse.wy = game.mouse.y + game.camera.y - game.camera.shakeY;
 
   updatePlayer(dt);
+  mpSendInput();
+  updateRemotePlayers(dt);
   updateMining(dt);
   updateDrops(dt);
   updateParticles(dt);
   updateFloaters(dt);
   updateRespawns(dt);
+}
+
+function updateRemotePlayers(dt) {
+  for (const rp of mp.remotePlayers.values()) {
+    rp.x = lerp(rp.x === undefined ? rp.tx : rp.x, rp.tx, 0.35);
+    rp.y = lerp(rp.y === undefined ? rp.ty : rp.y, rp.ty, 0.35);
+    rp.walk = (rp.walk || 0) + dt * ((rp.moving || rp.mining) ? 9 : 1.5);
+  }
 }
 
 function updateCamera(dt) {
@@ -2909,6 +3177,16 @@ function updatePlayer(dt) {
   p.angle = Math.atan2(game.mouse.wy - p.y, game.mouse.wx - p.x);
   p.moving = Math.hypot(p.vx, p.vy) > 18;
   p.walk += dt * (p.moving ? 9 + Math.hypot(p.vx, p.vy) * 0.012 : 1.5);
+
+  if (mp.selfServer) {
+    const err = dist(p.x, p.y, mp.selfServer.x, mp.selfServer.y);
+    if (err > 160) {
+      p.x = mp.selfServer.x; p.y = mp.selfServer.y; p.vx = 0; p.vy = 0;
+    } else if (err > 2) {
+      p.x = lerp(p.x, mp.selfServer.x, 0.3);
+      p.y = lerp(p.y, mp.selfServer.y, 0.3);
+    }
+  }
 }
 
 function pushOut(p, x, y, r) {
@@ -2949,8 +3227,11 @@ function updateMining(dt) {
     const d = game.target;
     const ore = d.oreId ? ORES[d.oreId] : null;
     const baseDur = ore ? ore.duration : 2.45;
-    const speed = equippedPickaxe().speed * (buffActive('tonic') ? 1.6 : 1) * (hasEvent('rush') ? 1.12 : 1);
-    d.progress += dt / (baseDur / speed);
+    const speed = equippedPickaxe().speed * (buffActive('tonic') ? 1.6 : 1);
+    // Server-authoritative: progress is only an estimate for HUD/animation.
+    // The real break arrives via deposit:broken, which resets it.
+    if (!d.active) { game.target = null; game.progress = 0; game.mining = false; updateMiningHud(); return; }
+    d.progress = Math.min(0.995, d.progress + dt / (baseDur / speed));
     game.progress = clamp(d.progress, 0, 1);
     game.mining = true;
     game.swingT += dt * (9 + speed * 2.5);
@@ -2962,12 +3243,6 @@ function updateMining(dt) {
       spawnSparks(d);
       d.hit = 1;
       if (state.settings.shake) game.camera.shake = Math.min(4.5, game.camera.shake + 1.5);
-    }
-    if (d.progress >= 1) {
-      breakDeposit(d);
-      game.target = null;
-      game.progress = 0;
-      game.mining = false;
     }
   } else {
     game.mining = false;
@@ -3020,54 +3295,33 @@ function spawnDrop(d, ore) {
 }
 
 function updateDrops(dt) {
-  const p = game.player;
-  const magnet = buffActive('magnet');
-  for (const drop of Array.from(game.drops)) {
+  for (const drop of game.drops) {
     drop.age += dt;
     drop.bob += dt * 3.2;
-    drop.vx *= Math.pow(0.02, dt);
-    drop.vy *= Math.pow(0.02, dt);
-    drop.x += drop.vx * dt;
-    drop.y += drop.vy * dt;
-    drop.x = clamp(drop.x, game.margin + 20, game.worldW - game.margin - 20);
-    drop.y = clamp(drop.y, game.margin + 20, game.worldH - game.margin - 20);
-    if (magnet) {
-      const dd = dist(drop.x, drop.y, p.x, p.y);
-      if (dd < 270 && dd > 1) {
-        const pull = (1 - dd / 270) * 980 + 240;
-        drop.x += ((p.x - drop.x) / dd) * pull * dt;
-        drop.y += ((p.y - drop.y) / dd) * pull * dt;
-        if (dd < 30) collectDrop(drop);
-      }
+    if (drop.tx !== undefined) {
+      drop.x = lerp(drop.x === undefined ? drop.tx : drop.x, drop.tx, 0.4);
+      drop.y = lerp(drop.y === undefined ? drop.ty : drop.y, drop.ty, 0.4);
+    } else if (drop.vx !== undefined) {
+      drop.vx *= Math.pow(0.02, dt);
+      drop.vy *= Math.pow(0.02, dt);
+      drop.x += drop.vx * dt;
+      drop.y += drop.vy * dt;
     }
   }
 }
 
-function collectDrop(drop) {
-  if (inventoryCount() >= INVENTORY_CAP) {
-    showGameMessage('Inventory full — sell ores to make room');
-    Sound.error();
-    return false;
-  }
-  const idx = game.drops.indexOf(drop);
-  if (idx < 0) return false;
-  game.drops.splice(idx, 1);
-  const ore = ORES[drop.oreId];
-  addOre(drop.oreId, game.mine.id, 1);
-  state.stats.oresMined += 1;
-  game.session.ores += 1;
-  const xp = Math.round(ore.xp * (hasEvent('rush') ? 1.5 : 1) * (1 + (game.mine.tier - 1) * 0.12));
-  addXP(xp);
-  spawnPickupParticles(drop.x, drop.y, ore);
-  addFloater(drop.x, drop.y - 18, `+1 ${ore.name}`, ore.color, 0.9);
-  Sound.pickup();
-  checkAchievements();
-  saveSoon();
-  syncUI();
-  return true;
-}
-
 function pickupNearby() {
+  if (mp.socket && mp.socket.connected && mp.roomId) {
+    mp.socket.emit('mine:pickup', {}, (ack) => {
+      if (ack && ack.ok) {
+        if (ack.picked > 0) Sound.pickup();
+        else showGameMessage('No ore drops nearby', 'info');
+      } else if (ack && ack.error !== 'rate_limited') {
+        showGameMessage(ack && ack.error === 'inventory_full' ? 'Inventory full — sell ores to make room' : 'Move closer to the ore drop', 'info');
+      }
+    });
+    return;
+  }
   const p = game.player;
   let picked = 0;
   for (const drop of Array.from(game.drops)) {
@@ -3087,19 +3341,7 @@ function pickupNearby() {
 
 function updateRespawns(dt) {
   for (const d of game.deposits) {
-    if (!d.active) {
-      if (game.time >= d.respawnAt) {
-        const pos = findOpenSpot(d.r, 160);
-        d.x = pos.x; d.y = pos.y;
-        d.oreId = Math.random() < 0.76 ? chooseOreId() : null;
-        d.seed = Math.random() * 1e9;
-        d.phase = rand(0, TAU);
-        d.progress = 0;
-        d.hit = 0;
-        d.scale = 0;
-        d.active = true;
-      }
-    } else if (d.scale < 1) {
+    if (d.active && d.scale < 1) {
       d.scale = Math.min(1, d.scale + dt * 1.8);
     }
     if (d.hit > 0) d.hit = Math.max(0, d.hit - dt * 5);
@@ -3221,22 +3463,21 @@ function selectSlot(i) {
   renderHotbar();
 }
 
-function useSelectedSlot() {
+async function useSelectedSlot() {
   const i = game.selectedSlot;
   if (i === 0) { showGameMessage('Your pickaxe is always equipped', 'info'); return; }
   const supply = SUPPLIES[i - 1];
   if (!supply) return;
   const count = state.consumables[supply.id] || 0;
   if (count <= 0) { showGameMessage(`No ${supply.name} in your bag`, 'info'); Sound.error(); return; }
-  state.consumables[supply.id] = count - 1;
-  const key = supply.id + 'Until';
-  game.buffs[key] = Math.max(Date.now(), game.buffs[key] || 0) + 30000;
-  Sound.buy();
-  toast(supply.name, supply.desc, 'green', supply.icon);
-  saveSoon();
-  syncUI();
-  renderHotbar();
-  updateBuffChips();
+  const d = await serverAction('/api/consumable/use', { consumableId: supply.id }, { noRender: true });
+  if (d && d.until) {
+    game.buffs[supply.id + 'Until'] = d.until;
+    Sound.buy();
+    toast(supply.name, supply.desc, 'green', supply.icon);
+    renderHotbar();
+    updateBuffChips();
+  }
 }
 
 function updateBuffChips() {
@@ -3310,6 +3551,7 @@ function render() {
   for (const p of game.props) drawables.push({ y: p.y, fn: () => drawProp(ctx, p) });
   for (const d of game.deposits) if (d.active) drawables.push({ y: d.y, fn: () => drawDeposit(ctx, d) });
   for (const drop of game.drops) drawables.push({ y: drop.y, fn: () => drawDrop(ctx, drop) });
+  for (const rp of mp.remotePlayers.values()) drawables.push({ y: rp.y, fn: () => drawRemotePlayer(ctx, rp) });
   drawables.push({ y: game.player.y, fn: () => drawPlayer(ctx) });
   drawables.sort((a, b) => a.y - b.y);
   for (const item of drawables) item.fn();
@@ -3483,9 +3725,11 @@ function drawCrystalShard(ctx, x, y, len, wid, ang, ore) {
   ctx.restore();
 }
 
-function drawPlayer(ctx) {
-  const p = game.player;
-  const pick = equippedPickaxe();
+function drawPlayer(ctx, remote) {
+  const p = remote || game.player;
+  const pick = remote ? getPickaxe(remote.equippedPickaxe || 'basic') : equippedPickaxe();
+  const mining = remote ? !!remote.mining : game.mining;
+  const swingT = remote ? (remote.walk || 0) * 2.4 : game.swingT;
   const t = game.time;
   const stride = Math.sin(p.walk) * (p.moving ? 7 : 1.5);
 
@@ -3573,7 +3817,7 @@ function drawPlayer(ctx) {
   ctx.fillStyle = '#f1c27d';
   ctx.beginPath(); ctx.ellipse(6, -11.5, 4.5, 3.6, -0.4, 0, TAU); ctx.fill();
 
-  const swing = game.mining ? Math.sin(game.swingT) * 0.85 - 0.25 : -0.15 + Math.sin(t * 1.5) * 0.04;
+  const swing = mining ? Math.sin(swingT) * 0.85 - 0.25 : -0.15 + Math.sin(t * 1.5) * 0.04;
   ctx.save();
   ctx.translate(8, 9);
   ctx.rotate(swing);
@@ -3592,6 +3836,38 @@ function drawPlayer(ctx) {
   ctx.beginPath(); ctx.moveTo(25, -9); ctx.quadraticCurveTo(32, 0, 25, 9); ctx.stroke();
   ctx.restore();
 
+  ctx.restore();
+}
+
+function drawRemotePlayer(ctx, rp) {
+  drawPlayer(ctx, rp);
+  const x = rp.x, y = rp.y;
+  const name = rp.username || 'Miner';
+  ctx.save();
+  ctx.font = '700 11px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  const label = `Lv ${rp.level || 1} · ${name}`;
+  const w = ctx.measureText(label).width + 14;
+  ctx.fillStyle = 'rgba(4,10,22,.72)';
+  roundRect(ctx, x - w / 2, y - 46, w, 17, 8);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(148,163,184,.35)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText(label, x, y - 34);
+
+  if (rp.targetId && rp.targetProgress > 0.01) {
+    const d = game.deposits.find(dep => dep.id === rp.targetId);
+    if (d && d.active) {
+      const rr = d.r + 9;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(15,23,42,.7)';
+      ctx.beginPath(); ctx.arc(d.x, d.y, rr, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = '#fbbf24';
+      ctx.beginPath(); ctx.arc(d.x, d.y, rr, -Math.PI / 2, -Math.PI / 2 + rp.targetProgress * TAU); ctx.stroke();
+    }
+  }
   ctx.restore();
 }
 
@@ -4130,6 +4406,10 @@ function drawMinimap(ctx) {
     ctx.beginPath();
     ctx.arc(ox + drop.x * s, oy + drop.y * s, 1, 0, TAU);
     ctx.fill();
+  }
+  for (const rp of mp.remotePlayers.values()) {
+    ctx.fillStyle = '#f472b6';
+    ctx.beginPath(); ctx.arc(ox + rp.x * s, oy + rp.y * s, 2.2, 0, TAU); ctx.fill();
   }
   const px = ox + p.x * s, py = oy + p.y * s;
   ctx.fillStyle = '#ffffff';
