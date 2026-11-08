@@ -142,7 +142,9 @@ const ERROR_STATUS = {
   unknown_consumable: 400,
   not_owned: 403,
   invalid_username: 400,
+  invalid_password: 400,
   username_taken: 409,
+  invalid_credentials: 401,
   already_connected: 409,
   room_full: 409,
   room_limit: 503,
@@ -591,6 +593,107 @@ app.get('/health', (req, res) => {
 
 app.get('/api/config', (req, res) => {
   res.json({ ok: true, config: getConfig() });
+});
+
+const USERNAME_RE = /^[A-Za-z0-9_]{3,24}$/;
+const AUTH_EMAIL_DOMAIN = 'orebound.game';
+const authRateBuckets = new Map();
+
+function authEmail(username) {
+  return username.toLowerCase() + '@' + AUTH_EMAIL_DOMAIN;
+}
+
+function authRateLimit(req, res, next) {
+  const key = String(req.ip || req.socket.remoteAddress || 'unknown');
+  const now = Date.now();
+  const bucket = authRateBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    authRateBuckets.set(key, { count: 1, resetAt: now + 10 * 60 * 1000 });
+    next();
+    return;
+  }
+  if (bucket.count >= 30) {
+    res.status(429).json({ ok: false, error: 'rate_limited' });
+    return;
+  }
+  bucket.count += 1;
+  next();
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of authRateBuckets) {
+    if (bucket.resetAt <= now) authRateBuckets.delete(key);
+  }
+}, 60000).unref();
+
+function sessionPayload(session) {
+  return {
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    expiresIn: session.expires_in,
+    tokenType: session.token_type || 'bearer',
+    user: session.user ? { id: session.user.id } : null
+  };
+}
+
+async function passwordLogin(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data || !data.session) throw new GameError('invalid_credentials', 401);
+  return sessionPayload(data.session);
+}
+
+app.post('/api/auth/signup', authRateLimit, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const username = typeof body.username === 'string' ? body.username.trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (!USERNAME_RE.test(username)) throw new GameError('invalid_username', 400);
+    if (password.length < 8 || password.length > 128) throw new GameError('invalid_password', 400);
+
+    const email = authEmail(username);
+    const { error: createError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { username }
+    });
+    if (createError) {
+      const detail = String(createError.message || createError.error_description || '');
+      if (/already|exists|duplicate|registered/i.test(detail)) throw new GameError('username_taken', 409);
+      throw createError;
+    }
+
+    const session = await passwordLogin(email, password);
+    res.json({ ok: true, ...session });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/auth/login', authRateLimit, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (!USERNAME_RE.test(username)) throw new GameError('invalid_username', 400);
+    if (!password) throw new GameError('invalid_credentials', 401);
+    res.json({ ok: true, ...(await passwordLogin(authEmail(username), password)) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/auth/refresh', authRateLimit, async (req, res) => {
+  try {
+    const refreshToken = req.body && typeof req.body.refreshToken === 'string' ? req.body.refreshToken : '';
+    if (!refreshToken) throw new GameError('unauthorized', 401);
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+    if (error || !data || !data.session) throw new GameError('unauthorized', 401);
+    res.json({ ok: true, ...sessionPayload(data.session) });
+  } catch (error) {
+    sendError(res, error);
+  }
 });
 
 app.get('/api/me', requireAuth, async (req, res) => {
