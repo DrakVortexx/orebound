@@ -611,6 +611,38 @@
   .auth-submit:hover{filter:brightness(1.12)}
   .auth-submit:disabled{opacity:.55;cursor:default}
   .auth-hint{text-align:center;font-size:11.5px;color:var(--dim);margin-top:16px;line-height:1.6}
+  /* Bazaar / Players / Trades */
+  .search-bar{display:flex;gap:10px;margin-bottom:16px}
+  .search-bar input{flex:1;padding:11px 14px;border-radius:11px;border:1px solid var(--line);background:rgba(6,11,23,.7);color:var(--text);font-size:14px;outline:none}
+  .search-bar input:focus{border-color:rgba(96,165,250,.55);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+  .online-dot{width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 6px #34d399;display:inline-block;flex-shrink:0}
+  .online-dot.off{background:#475569;box-shadow:none}
+  .player-row{display:flex;align-items:center;gap:12px;padding:11px 4px;border-bottom:1px solid rgba(148,163,184,.08)}
+  .player-row:last-child{border-bottom:0}
+  .player-av{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#fff;flex-shrink:0}
+  .player-meta{flex:1;min-width:0}
+  .player-name{font-weight:800;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .player-sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .sell-form{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:10px;align-items:end}
+  .sell-form label{font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-weight:700;display:block;margin-bottom:6px}
+  .sell-form select,.sell-form input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:rgba(6,11,23,.7);color:var(--text);font-size:13px;outline:none}
+  .sell-form select:focus,.sell-form input:focus{border-color:rgba(96,165,250,.55)}
+  .trade-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .trade-col{background:rgba(6,11,23,.45);border:1px solid var(--line);border-radius:12px;padding:12px;min-height:120px}
+  .trade-col h4{margin:0 0 10px;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted)}
+  .trade-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;background:rgba(148,163,184,.07);margin-bottom:6px;font-size:12.5px}
+  .trade-item .ti-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .trade-qty{display:flex;align-items:center;gap:5px;flex-shrink:0}
+  .trade-qty button{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:rgba(148,163,184,.12);color:#fff;cursor:pointer;font-weight:800;line-height:1}
+  .trade-qty button:hover{background:rgba(96,165,250,.25)}
+  .trade-empty{font-size:12px;color:var(--muted);padding:8px 2px}
+  .inv-pick{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;background:rgba(148,163,184,.05);margin-bottom:5px;font-size:12px}
+  .inv-pick .ti-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .status-pill{font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;padding:3px 9px;border-radius:20px}
+  .status-pill.pending{background:rgba(251,191,36,.15);color:#fcd34d}
+  .status-pill.completed{background:rgba(52,211,153,.15);color:#6ee7b7}
+  .status-pill.cancelled{background:rgba(148,163,184,.15);color:var(--muted)}
+  @media(max-width:900px){.trade-cols{grid-template-columns:1fr}.sell-form{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -666,6 +698,8 @@
         <button class="nav-btn active" data-action="nav" data-view="home">Home</button>
         <button class="nav-btn" data-action="nav" data-view="inventory">Inventory</button>
         <button class="nav-btn" data-action="nav" data-view="shop">Shop</button>
+        <button class="nav-btn" data-action="nav" data-view="bazaar">Bazaar</button>
+        <button class="nav-btn" data-action="nav" data-view="players">Players</button>
         <button class="nav-btn" data-action="nav" data-view="stats">Stats</button>
         <button class="nav-btn" data-action="nav" data-view="settings">Settings</button>
       </nav>
@@ -685,6 +719,8 @@
         <section id="view-home" class="view"></section>
         <section id="view-inventory" class="view hidden"></section>
         <section id="view-shop" class="view hidden"></section>
+        <section id="view-bazaar" class="view hidden"></section>
+        <section id="view-players" class="view hidden"></section>
         <section id="view-stats" class="view hidden"></section>
         <section id="view-settings" class="view hidden"></section>
       </div>
@@ -1531,6 +1567,7 @@ async function mpConnectInner() {
     toast('Achievement Unlocked', (a && a.name) || 'Done', 'gold', 'trophy');
     mpRefreshSoon();
   });
+  bindSocialSocket(s);
   return s;
 }
 
@@ -1860,7 +1897,9 @@ const ICON_PATHS = {
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   sparkle: '<path d="m12 2 1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8L12 2Z"/>',
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
-  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>'
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M21 20c0-2.8-1.8-5-4.5-5.5"/>',
+  swap: '<path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/>'
 };
 function icon(name, cls = '') {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ICON_PATHS.gem}</svg>`;
@@ -2027,6 +2066,8 @@ function renderView(view = ui.view) {
   if (view === 'home') renderHome();
   else if (view === 'inventory') renderInventory();
   else if (view === 'shop') renderShop();
+  else if (view === 'bazaar') renderBazaar();
+  else if (view === 'players') renderPlayers();
   else if (view === 'stats') renderStats();
   else if (view === 'settings') renderSettings();
   syncUI();
@@ -2071,7 +2112,7 @@ function leaderboardHTML() {
       <div class="lb-wealth">${coinImg()}${fmt(r.wealth)}</div>
     </div>`;
   }).join('')}</div>
-  <div class="lb-foot">Wealth is calculated from your coin balance plus the value of every ore in your inventory.</div>`;
+  <div class="lb-foot">Wealth is your coin balance — inventory value doesn't count. Sell smart, stack deep.</div>`;
 }
 
 function renderHome() {
@@ -2490,6 +2531,492 @@ function confirmReset() {
 }
 
 // ============================================================
+// BAZAAR / PLAYERS / TRADES
+// ============================================================
+const social = {
+  bazaar: { listings: null },
+  players: { query: '', results: null, friends: null, trades: null },
+  tradeDraft: null
+};
+
+const stackLabel = (oreId, mineId) => `${ORES[oreId] ? ORES[oreId].name : oreId} · ${getMine(mineId).name}`;
+const avatarColor = (name) => {
+  let h = 0;
+  for (const c of String(name || '?')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `hsl(${h % 360} 55% 38%)`;
+};
+const initialsOf = (name) => String(name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+async function loadBazaar() {
+  try {
+    const d = await api('/api/bazaar');
+    social.bazaar.listings = d.listings || [];
+  } catch { /* keep previous data; null retries on next render */ }
+  if (ui.view === 'bazaar') renderBazaar();
+}
+
+function renderBazaar() {
+  const view = $('#view-bazaar');
+  if (!view) return;
+  const listings = social.bazaar.listings || [];
+  const myListings = listings.filter(l => l.sellerId === meUserId);
+  const market = listings.filter(l => l.sellerId !== meUserId);
+  const stacks = state.inventory.slice().sort((a, b) => b.qty * b.value - a.qty * a.value);
+  view.innerHTML = `
+    <div class="view-head">
+      <div><div class="view-title">Bazaar</div><div class="view-sub">List ores for other miners, or snap up a deal before someone else does.</div></div>
+      <div class="view-head-right"><div class="inv-value">${coinImg()} ${fmt(state.coins)} <span style="font-size:10px;color:var(--muted);font-weight:700">BALANCE</span></div></div>
+    </div>
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><div class="panel-title">${icon('shop')} Sell From Inventory</div></div>
+      <div class="panel-body">
+        ${stacks.length ? `<div class="sell-form">
+          <div><label>Ore stack</label><select id="bsStack">${stacks.map(s => `<option value="${stackKey(s)}">${ORES[s.oreId].name} ×${fmt(s.qty)} — ${getMine(s.mineId).name}</option>`).join('')}</select></div>
+          <div><label>Quantity</label><input id="bsQty" type="number" min="1" value="1"></div>
+          <div><label>Price each</label><input id="bsPrice" type="number" min="1" value="1"></div>
+          <button class="btn gold" data-action="bazaar-sell">List Item</button>
+        </div>` : `<div class="trade-empty">Your inventory is empty — go mine some ore first.</div>`}
+      </div>
+    </div>
+    ${myListings.length ? `<div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><div class="panel-title">${icon('bag')} My Listings</div><span class="tag blue">${myListings.length}</span></div>
+      <div class="panel-body"><div class="shop-grid">${myListings.map(l => listingCardHTML(l, true)).join('')}</div></div>
+    </div>` : ''}
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">${icon('gem')} Marketplace</div><span class="tag blue">${market.length} listed</span></div>
+      <div class="panel-body">
+        ${market.length ? `<div class="shop-grid">${market.map(l => listingCardHTML(l, false)).join('')}</div>`
+          : `<div class="empty-state"><div class="es-ic">${icon('gem')}</div><b>No listings yet</b><p>Be the first to set out your wares — other miners are always digging.</p></div>`}
+      </div>
+    </div>
+  `;
+  if (social.bazaar.listings === null) void loadBazaar();
+}
+
+function listingCardHTML(l, mine) {
+  const ore = ORES[l.oreId];
+  const rar = ore ? RARITIES[ore.rarity] : null;
+  const affordable = state.coins >= l.total;
+  return `<div class="shop-card">
+    <div class="shop-card-top">
+      <div class="shop-icon">${ore ? gemSVG(ore, 30) : ''}</div>
+      <div><div class="shop-name">${ore ? ore.name : l.oreId} <span style="font-size:11px;color:var(--muted);font-weight:700">×${fmt(l.quantity)}</span></div>
+      <div class="shop-sub">${getMine(l.mineId).name}${rar ? ` · <span style="color:${rar.color}">${ore.rarity}</span>` : ''}</div></div>
+    </div>
+    <div class="shop-stats">
+      <div class="shop-stat"><span>Seller</span><b>${escapeHtml(l.sellerName)} · Lv ${l.sellerLevel}</b></div>
+      <div class="shop-stat"><span>Price each</span><b>${coinImg()} ${fmt(l.priceEach)}</b></div>
+      <div class="shop-stat"><span>Total</span><b class="listing-total">${coinImg()} ${fmt(l.total)}</b></div>
+    </div>
+    <div class="shop-foot">
+      ${mine
+        ? `<span class="tag blue">Your listing</span><button class="btn sm ghost" data-action="bazaar-cancel" data-id="${l.id}" style="margin-left:auto">Cancel</button>`
+        : `<span class="tag">${affordable ? 'Affordable' : 'Too pricey'}</span><button class="btn sm ${affordable ? 'gold' : 'ghost'}" data-action="bazaar-buy" data-id="${l.id}" ${affordable ? '' : 'disabled'} style="margin-left:auto">Buy</button>`}
+    </div>
+  </div>`;
+}
+
+function openSellModal() {
+  const stacks = state.inventory.slice().sort((a, b) => b.qty * b.value - a.qty * a.value);
+  if (!stacks.length) { toast('Inventory Empty', 'Mine some ore before listing it.', 'red', 'bag'); return; }
+  openModal({
+    iconName: 'shop', tone: 'gold',
+    title: 'List on the Bazaar',
+    sub: 'Items leave your inventory until they sell or you cancel.',
+    body: `<div class="sell-form" style="grid-template-columns:1fr 1fr">
+      <div><label>Ore stack</label><select id="bsStack">${stacks.map(s => `<option value="${stackKey(s)}">${ORES[s.oreId].name} ×${fmt(s.qty)} — ${getMine(s.mineId).name}</select>`).join('')}</select></div>
+      <div><label>Quantity</label><input id="bsQty" type="number" min="1" value="1"></div>
+      <div><label>Price each</label><input id="bsPrice" type="number" min="1" value="1"></div>
+      <div><label>&nbsp;</label><div id="bsTotal" style="font-size:12px;color:var(--muted);padding-top:10px"></div></div>
+    </div>`,
+    actions: [
+      { label: 'Cancel', cls: 'ghost', onClick: closeModal },
+      {
+        label: 'List Item', cls: 'gold',
+        onClick: () => {
+          const key = ($('#bsStack') || {}).value;
+          const stack = state.inventory.find(s => stackKey(s) === key);
+          const qty = Math.floor(Number(($('#bsQty') || {}).value)) || 0;
+          const price = Math.floor(Number(($('#bsPrice') || {}).value)) || 0;
+          if (!stack || qty < 1 || qty > stack.qty || price < 1) {
+            toast('Invalid Listing', 'Check the stack, quantity, and price.', 'red', 'x');
+            return;
+          }
+          closeModal();
+          void bazaarList(stack, qty, price);
+        }
+      }
+    ]
+  });
+  const upd = () => {
+    const key = ($('#bsStack') || {}).value;
+    const stack = state.inventory.find(s => stackKey(s) === key);
+    const qty = Math.floor(Number(($('#bsQty') || {}).value)) || 0;
+    const price = Math.floor(Number(($('#bsPrice') || {}).value)) || 0;
+    const el = $('#bsTotal');
+    if (el) el.innerHTML = stack && qty > 0 && price > 0 ? `${coinImg()} ${fmt(qty * price)} total` : '';
+  };
+  ['bsStack', 'bsQty', 'bsPrice'].forEach(id => {
+    const el = $('#' + id);
+    if (el) el.addEventListener('input', upd);
+  });
+  upd();
+}
+
+async function bazaarList(stack, qty, price) {
+  const d = await serverAction('/api/bazaar/list', {
+    oreId: stack.oreId, mineId: stack.mineId, quantity: qty, priceEach: price
+  });
+  if (!d) return;
+  Sound.coin();
+  toast('Listed', `${ORES[stack.oreId].name} ×${qty} is on the bazaar.`, 'green', 'shop');
+  if (ui.view === 'bazaar') renderBazaar();
+}
+
+async function bazaarBuy(listingId) {
+  const d = await serverAction('/api/bazaar/buy', { listingId });
+  if (!d) return;
+  Sound.coin();
+  toast('Purchase Complete', `+${fmt(d.quantity)} ${ORES[d.oreId] ? ORES[d.oreId].name : 'ore'} for ${fmt(d.total)} coins`, 'gold', 'coin');
+  if (ui.view === 'bazaar') renderBazaar();
+  else loadBazaar();
+}
+
+async function bazaarCancel(listingId) {
+  const d = await serverAction('/api/bazaar/cancel', { listingId });
+  if (!d) return;
+  Sound.ui();
+  toast('Listing Cancelled', 'Your items are back in your inventory.', 'green', 'check');
+  if (ui.view === 'bazaar') renderBazaar();
+  else loadBazaar();
+}
+
+// ---------------- Players / friends ----------------
+
+async function loadPlayers() {
+  try {
+    const [friends, trades] = await Promise.all([
+      api('/api/players/friends'),
+      api('/api/trades')
+    ]);
+    social.players.friends = friends.friends || [];
+    social.players.trades = trades.trades || [];
+    if (social.players.results) {
+      social.players.results = social.players.results.map(r => ({
+        ...r,
+        relation: (social.players.friends.find(f => f.userId === r.userId) || {}).relation || 'none'
+      }));
+    }
+  } catch { /* keep previous data; null retries on next render */ }
+  if (ui.view === 'players') renderPlayers();
+}
+
+function relationBadge(relation) {
+  if (relation === 'friend') return '<span class="status-pill completed">Friend</span>';
+  if (relation === 'incoming') return '<span class="status-pill pending">Request</span>';
+  if (relation === 'outgoing') return '<span class="status-pill pending">Sent</span>';
+  return '';
+}
+
+function playerRowHTML(p, actionsHTML) {
+  return `<div class="player-row">
+    <div class="player-av" style="background:${avatarColor(p.username)}">${initialsOf(p.username)}</div>
+    <div class="player-meta">
+      <div class="player-name">${escapeHtml(p.username)} ${relationBadge(p.relation || '')}${p.online ? '<span class="online-dot" title="Online"></span>' : '<span class="online-dot off" title="Offline"></span>'}</div>
+      <div class="player-sub">Level ${p.level}${p.relation === 'friend' ? ' · Friend' : p.relation === 'incoming' ? ' · Wants to be friends' : p.relation === 'outgoing' ? ' · Request sent' : ''}</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${actionsHTML}</div>
+  </div>`;
+}
+
+function renderPlayers() {
+  const view = $('#view-players');
+  if (!view) return;
+  const p = social.players;
+  const friends = p.friends || [];
+  const incoming = friends.filter(f => f.relation === 'incoming');
+  const outgoing = friends.filter(f => f.relation === 'outgoing');
+  const accepted = friends.filter(f => f.relation === 'friend');
+  const results = p.results;
+  const trades = (p.trades || []).filter(t => t.status === 'pending' || t.status === 'completed').slice(0, 8);
+  view.innerHTML = `
+    <div class="view-head">
+      <div><div class="view-title">Players</div><div class="view-sub">Find miners, make friends, and trade ores.</div></div>
+    </div>
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><div class="panel-title">${icon('users')} Find Players</div></div>
+      <div class="panel-body">
+        <div class="search-bar">
+          <input id="playerQuery" maxlength="24" placeholder="Search by username…" value="${escapeHtml(p.query)}">
+          <button class="btn primary" data-action="player-search">Search</button>
+        </div>
+        ${results === null ? '' : results.length ? `<div>${results.map(r => playerRowHTML(r, `
+          ${r.relation === 'none' ? `<button class="btn sm primary" data-action="friend-request" data-uid="${r.userId}">Add Friend</button><button class="btn sm ghost" data-action="trade-propose" data-uid="${r.userId}">Trade</button>` : ''}
+          ${r.relation === 'outgoing' ? `<button class="btn sm ghost" data-action="friend-remove" data-uid="${r.userId}">Cancel</button>` : ''}
+          ${r.relation === 'incoming' ? `<button class="btn sm primary" data-action="friend-accept" data-uid="${r.userId}">Accept</button><button class="btn sm ghost" data-action="friend-decline" data-uid="${r.userId}">Decline</button>` : ''}
+          ${r.relation === 'friend' ? `<button class="btn sm primary" data-action="trade-propose" data-uid="${r.userId}">Trade</button><button class="btn sm ghost" data-action="friend-remove" data-uid="${r.userId}">Remove</button>` : ''}
+        `)).join('')}</div>` : `<div class="trade-empty">No players match that name.</div>`}
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-head"><div class="panel-title">${icon('users')} Friends</div><span class="tag blue">${accepted.length}</span></div>
+      <div class="panel-body">
+        ${incoming.length ? `<div style="margin-bottom:10px"><div style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-weight:800;margin-bottom:4px">Requests</div>${incoming.map(f => playerRowHTML(f, `
+          <button class="btn sm primary" data-action="friend-accept" data-uid="${f.userId}">Accept</button>
+          <button class="btn sm ghost" data-action="friend-decline" data-uid="${f.userId}">Decline</button>
+        `)).join('')}</div>` : ''}
+        ${outgoing.length ? `<div style="margin-bottom:10px"><div style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-weight:800;margin-bottom:4px">Sent</div>${outgoing.map(f => playerRowHTML(f, `
+          <button class="btn sm ghost" data-action="friend-remove" data-uid="${f.userId}">Cancel</button>
+        `)).join('')}</div>` : ''}
+        ${accepted.length ? accepted.map(f => playerRowHTML(f, `
+          <button class="btn sm primary" data-action="trade-propose" data-uid="${f.userId}">Trade</button>
+          <button class="btn sm ghost" data-action="friend-remove" data-uid="${f.userId}">Remove</button>
+        `)).join('') : (!incoming.length && !outgoing.length ? '<div class="trade-empty">No friends yet — search for miners above.</div>' : '')}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">${icon('swap')} Trades</div><span class="tag blue">${trades.length}</span></div>
+      <div class="panel-body">
+        ${trades.length ? trades.map(t => {
+          const other = t.mySide === 'initiator' ? t.targetName : t.initiatorName;
+          const mine = t.items.filter(i => i.userId === meUserId).reduce((a, i) => a + i.quantity, 0);
+          const theirs = t.items.filter(i => i.userId !== meUserId).reduce((a, i) => a + i.quantity, 0);
+          return `<div class="player-row">
+            <div class="player-av" style="background:${avatarColor(other)}">${initialsOf(other)}</div>
+            <div class="player-meta">
+              <div class="player-name">${escapeHtml(other)} ${t.status === 'pending' ? '<span class="status-pill pending">Pending</span>' : '<span class="status-pill completed">Done</span>'}</div>
+              <div class="player-sub">You offer ${mine} · They offer ${theirs} ${t.iAmTarget && t.status === 'pending' ? '· Waiting on you' : ''}</div>
+            </div>
+            <button class="btn sm ${t.iAmTarget && t.status === 'pending' ? 'gold' : 'ghost'}" data-action="trade-open" data-id="${t.id}">${t.status === 'pending' ? 'Open' : 'View'}</button>
+          </div>`;
+        }).join('') : '<div class="trade-empty">No trades yet — pick a friend and propose one.</div>'}
+      </div>
+    </div>
+  `;
+  if (social.players.friends === null || social.players.trades === null) void loadPlayers();
+}
+
+async function playerSearch() {
+  const input = $('#playerQuery');
+  const q = (input ? input.value : social.players.query || '').trim();
+  social.players.query = q;
+  if (q.length < 2) { social.players.results = []; renderPlayers(); return; }
+  try {
+    const d = await api('/api/players/search?q=' + encodeURIComponent(q));
+    const friends = social.players.friends || [];
+    const relOf = (uid) => {
+      const f = friends.find(x => x.userId === uid);
+      return f ? f.relation : 'none';
+    };
+    social.players.results = (d.results || []).map(r => ({ ...r, relation: relOf(r.userId) }));
+  } catch {
+    social.players.results = [];
+  }
+  if (ui.view === 'players') renderPlayers();
+}
+
+async function friendAction(action, userId) {
+  const path = action === 'request' ? '/api/friends/request'
+    : action === 'remove' ? '/api/friends/remove' : '/api/friends/respond';
+  const body = action === 'accept' ? { userId, accept: true }
+    : action === 'decline' ? { userId, accept: false } : { userId };
+  const d = await serverAction(path, body);
+  if (!d) return;
+  if (action === 'request') {
+    const st = d.status;
+    if (st === 'pending') toast('Request Sent', `${d.targetName || 'Player'} can now accept your friend request.`, 'green', 'users');
+    else if (st === 'accepted') toast('Friends!', 'You are now friends.', 'gold', 'users');
+    else toast('Already friends', 'You are already connected.', 'blue', 'users');
+  } else if (action === 'accept') {
+    toast('Friend Added', 'You are now friends.', 'gold', 'users');
+  } else if (action === 'decline') {
+    toast('Request Declined', '', 'blue', 'users');
+  } else {
+    toast('Friend Removed', '', 'blue', 'users');
+  }
+  await loadPlayers();
+}
+
+async function proposeTradeTo(userId) {
+  const d = await serverAction('/api/trades/propose', { userId });
+  if (!d) return;
+  toast('Trade Proposed', `Trade #${d.tradeId} is open — add your items.`, 'blue', 'swap');
+  await loadPlayers();
+  void openTradeModal(d.tradeId);
+}
+
+// ---------------- Trade modal ----------------
+
+async function refreshTrades() {
+  try {
+    const d = await api('/api/trades');
+    social.players.trades = d.trades || [];
+  } catch { /* ignore */ }
+  if (ui.view === 'players') renderPlayers();
+}
+
+async function openTradeModal(tradeId) {
+  await refreshTrades();
+  const trade = (social.players.trades || []).find(t => t.id === tradeId);
+  if (!trade) { toast('Trade Not Found', 'It may have been completed or cancelled.', 'red', 'x'); return; }
+  if (!social.tradeDraft || social.tradeDraft.tradeId !== tradeId) {
+    const myItems = trade.items.filter(i => i.userId === meUserId)
+      .map(i => ({ oreId: i.oreId, mineId: i.mineId, quantity: i.quantity }));
+    social.tradeDraft = { tradeId, items: myItems };
+  }
+  renderTradeModal(trade);
+}
+
+function tradeItemChip(item, editable, idx) {
+  const ore = ORES[item.oreId];
+  return `<div class="trade-item">
+    <span style="width:10px;height:10px;border-radius:3px;background:${ore ? ore.color : '#888'};flex-shrink:0"></span>
+    <span class="ti-name">${escapeHtml(stackLabel(item.oreId, item.mineId))}</span>
+    ${editable ? `<span class="trade-qty">
+      <button data-ta="tdec" data-idx="${idx}">−</button><b>${fmt(item.quantity)}</b><button data-ta="tinc" data-idx="${idx}">+</button><button data-ta="trm" data-idx="${idx}" style="color:#fca5a5">×</button>
+    </span>` : `<b>×${fmt(item.quantity)}</b>`}
+  </div>`;
+}
+
+function renderTradeModal(trade) {
+  const root = $('#modalRoot');
+  if (!root) return;
+  const otherName = trade.mySide === 'initiator' ? trade.targetName : trade.initiatorName;
+  const pending = trade.status === 'pending';
+  const draft = social.tradeDraft && social.tradeDraft.tradeId === trade.id ? social.tradeDraft : null;
+  const myItems = draft ? draft.items : trade.items.filter(i => i.userId === meUserId)
+    .map(i => ({ oreId: i.oreId, mineId: i.mineId, quantity: i.quantity }));
+  const theirItems = trade.items.filter(i => i.userId !== meUserId);
+  const offeredKeys = new Set(myItems.map(i => i.oreId + '|' + i.mineId));
+  const addable = state.inventory.filter(s => !offeredKeys.has(s.oreId + '|' + s.mineId));
+  root.innerHTML = `<div class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" style="max-width:640px;width:92%">
+      <div class="modal-head">
+        <div class="modal-ic gold">${icon('swap')}</div>
+        <div><h3>Trade with ${escapeHtml(otherName)}</h3><div class="modal-sub">${pending ? (trade.iAmTarget ? 'They proposed this trade — review and accept.' : 'Waiting for them to accept.') : 'This trade is ' + trade.status + '.'}</div></div>
+      </div>
+      <div class="modal-body">
+        <div class="trade-cols">
+          <div class="trade-col"><h4>Their offer</h4>${theirItems.length ? theirItems.map(i => tradeItemChip(i, false)).join('') : '<div class="trade-empty">Nothing offered yet.</div>'}</div>
+          <div class="trade-col"><h4>Your offer</h4>${myItems.length ? myItems.map((i, idx) => tradeItemChip(i, true, idx)).join('') : '<div class="trade-empty">Nothing offered yet.</div>'}</div>
+        </div>
+        ${pending ? `<div style="margin-top:14px"><div style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-weight:800;margin-bottom:6px">Add from inventory</div>
+          ${addable.length ? addable.map(s => `<div class="inv-pick"><span style="width:9px;height:9px;border-radius:3px;background:${ORES[s.oreId].color};flex-shrink:0"></span><span class="ti-name">${escapeHtml(stackLabel(s.oreId, s.mineId))} <b>×${fmt(s.qty)}</b></span><button class="btn sm ghost" data-ta="tadd" data-key="${stackKey(s)}">Add</button></div>`).join('') : '<div class="trade-empty">Everything you own is already in the offer.</div>'}
+        </div>` : ''}
+      </div>
+      <div class="modal-actions">
+        ${pending ? `<button class="btn ghost" data-ta="tcancel">Cancel Trade</button>
+        <button class="btn ghost" data-ta="tsave">Update Offer</button>
+        ${trade.iAmTarget ? '<button class="btn gold" data-ta="taccept">Accept Trade</button>' : ''}` : '<button class="btn primary" data-ta="tclose">Close</button>'}
+      </div>
+    </div>
+  </div>`;
+  const backdrop = root.querySelector('.modal-backdrop');
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  root.querySelectorAll('[data-ta]').forEach(btn => {
+    btn.addEventListener('click', () => void tradeModalAction(btn.dataset.ta, btn.dataset, trade));
+  });
+}
+
+async function tradeModalAction(action, dataset, trade) {
+  if (!social.tradeDraft || social.tradeDraft.tradeId !== trade.id) return;
+  const draft = social.tradeDraft;
+  if (action === 'tadd') {
+    const stack = state.inventory.find(s => stackKey(s) === dataset.key);
+    if (!stack) return;
+    const existing = draft.items.find(i => i.oreId === stack.oreId && i.mineId === stack.mineId);
+    if (existing) {
+      const cap = stack.qty;
+      existing.quantity = Math.min(cap, existing.quantity + stack.qty);
+    } else {
+      draft.items.push({ oreId: stack.oreId, mineId: stack.mineId, quantity: stack.qty });
+    }
+    renderTradeModal(trade);
+    return;
+  }
+  if (action === 'tinc' || action === 'tdec' || action === 'trm') {
+    const idx = Number(dataset.idx);
+    const item = draft.items[idx];
+    if (!item) return;
+    const stack = state.inventory.find(s => s.oreId === item.oreId && s.mineId === item.mineId);
+    const owned = stack ? stack.qty : 0;
+    if (action === 'trm') draft.items.splice(idx, 1);
+    else if (action === 'tinc') item.quantity = Math.min(owned, item.quantity + 1);
+    else item.quantity = Math.max(1, item.quantity - 1);
+    if (item.quantity > owned) item.quantity = Math.max(1, owned);
+    renderTradeModal(trade);
+    return;
+  }
+  if (action === 'tsave') {
+    const items = draft.items.filter(i => i.quantity > 0)
+      .map(i => ({ oreId: i.oreId, mineId: i.mineId, quantity: i.quantity }));
+    const d = await serverAction('/api/trades/offer', { tradeId: trade.id, items });
+    if (!d) return;
+    Sound.ui();
+    toast('Offer Updated', `${items.length} item stack${items.length === 1 ? '' : 's'} offered.`, 'blue', 'swap');
+    await refreshTrades();
+    const fresh = (social.players.trades || []).find(t => t.id === trade.id);
+    if (fresh) renderTradeModal(fresh);
+    if (ui.view === 'players') renderPlayers();
+    return;
+  }
+  if (action === 'taccept') {
+    const d = await serverAction('/api/trades/accept', { tradeId: trade.id });
+    if (!d) return;
+    Sound.coin();
+    toast('Trade Complete', 'Items exchanged successfully.', 'gold', 'swap');
+    social.tradeDraft = null;
+    closeModal();
+    await refreshTrades();
+    if (ui.view === 'players') renderPlayers();
+    return;
+  }
+  if (action === 'tcancel') {
+    const d = await serverAction('/api/trades/cancel', { tradeId: trade.id });
+    if (!d) return;
+    toast('Trade Cancelled', '', 'blue', 'swap');
+    social.tradeDraft = null;
+    closeModal();
+    await refreshTrades();
+    if (ui.view === 'players') renderPlayers();
+    return;
+  }
+  if (action === 'tclose') { closeModal(); return; }
+}
+
+// ---------------- socket social events ----------------
+function bindSocialSocket(s) {
+  s.on('bazaar:sold', (d) => {
+    const name = d && d.oreId && ORES[d.oreId] ? ORES[d.oreId].name : 'Ores';
+    toast('Bazaar Sale', `${d.quantity || ''}× ${name} sold for ${fmt(d.total || 0)} coins${d.buyerName ? ' to ' + d.buyerName : ''}`, 'gold', 'coin');
+    if (ui.view === 'bazaar') renderBazaar(); else void loadBazaar();
+  });
+  s.on('friend:request', (d) => {
+    toast('Friend Request', `${(d && d.from && d.from.username) || 'Someone'} wants to be friends`, 'blue', 'users');
+    void loadPlayers();
+  });
+  s.on('friend:update', () => { void loadPlayers(); });
+  s.on('trade:invite', (d) => {
+    toast('Trade Invite', `${(d && d.from && d.from.username) || 'Someone'} wants to trade with you`, 'blue', 'swap');
+    void refreshTrades();
+  });
+  s.on('trade:updated', (d) => {
+    void refreshTrades();
+    if (d && social.tradeDraft && social.tradeDraft.tradeId === d.tradeId) {
+      openTradeModal(d.tradeId);
+    }
+  });
+  s.on('trade:completed', (d) => {
+    toast('Trade Complete', 'Your trade was completed.', 'gold', 'swap');
+    if (d && social.tradeDraft && social.tradeDraft.tradeId === d.tradeId) {
+      social.tradeDraft = null;
+      closeModal();
+    }
+    void refreshTrades();
+  });
+}
+
+// ============================================================
 // GLOBAL ACTIONS
 // ============================================================
 document.addEventListener('click', (e) => {
@@ -2559,6 +3086,16 @@ document.addEventListener('click', (e) => {
     if (s) void buySupply(s);
     return;
   }
+  if (action === 'bazaar-sell') { openSellModal(); return; }
+  if (action === 'bazaar-buy') { void bazaarBuy(Number(el.dataset.id)); return; }
+  if (action === 'bazaar-cancel') { void bazaarCancel(Number(el.dataset.id)); return; }
+  if (action === 'player-search') { void playerSearch(); return; }
+  if (action === 'friend-request') { void friendAction('request', el.dataset.uid); return; }
+  if (action === 'friend-accept') { void friendAction('accept', el.dataset.uid); return; }
+  if (action === 'friend-decline') { void friendAction('decline', el.dataset.uid); return; }
+  if (action === 'friend-remove') { void friendAction('remove', el.dataset.uid); return; }
+  if (action === 'trade-propose') { void proposeTradeTo(el.dataset.uid); return; }
+  if (action === 'trade-open') { void openTradeModal(Number(el.dataset.id)); return; }
   if (action === 'toggle-setting') {
     const key = el.dataset.setting;
     if (!(key in state.settings)) return;
@@ -2609,6 +3146,7 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target && e.target.id === 'playerQuery') { void playerSearch(); return; }
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
   if (e.key === 'Escape') {
     const modal = $('#modalRoot');

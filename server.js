@@ -235,6 +235,16 @@ const ERROR_STATUS = {
   inventory_full: 409,
   mine_mismatch: 409,
   rate_limited: 429,
+  listing_not_found: 404,
+  own_listing: 409,
+  insufficient_ore: 409,
+  trade_not_found: 404,
+  trade_closed: 409,
+  not_participant: 403,
+  not_authorized: 403,
+  empty_trade: 400,
+  request_not_found: 404,
+  invalid_target: 400,
   server_error: 500
 };
 
@@ -994,6 +1004,467 @@ async function getLeaderboard(limit) {
     updatedAt: row.updated_at
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Bazaar / players / friends / trades
+// ---------------------------------------------------------------------------
+
+function emitToUser(userId, event, payload) {
+  io.to('user:' + userId).emit(event, payload);
+}
+
+async function syncRemotePlayer(userId) {
+  const other = activePlayers.get(userId);
+  if (!other) return;
+  try {
+    await enqueue(other, () => refreshPlayerState(other));
+    emitPlayerUpdate(other);
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      message: 'remote_player_sync_failed',
+      userId,
+      detail: asGameError(error).code
+    }));
+  }
+}
+
+function onlinePlayerIds() {
+  const ids = [];
+  for (const player of activePlayers.values()) {
+    if (player.socketId) ids.push(player.id);
+  }
+  return ids;
+}
+
+async function listBazaarItems() {
+  const { data, error } = await supabase
+    .from('market_listings')
+    .select('id,seller_id,ore_id,mine_id,quantity,unit_value,price_each,created_at')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) throw error;
+  const rows = data || [];
+  const sellerIds = [...new Set(rows.map(row => row.seller_id))];
+  const sellers = new Map();
+  if (sellerIds.length) {
+    const { data: profiles, error: profileError } = await supabase
+      .from('profiles')
+      .select('id,username,level')
+      .in('id', sellerIds);
+    if (profileError) throw profileError;
+    for (const profile of profiles || []) sellers.set(profile.id, profile);
+  }
+  return rows
+    .map(row => {
+      const seller = sellers.get(row.seller_id) || {};
+      const quantity = toInt(row.quantity, 0);
+      const priceEach = toInt(row.price_each, 0);
+      return {
+        id: toInt(row.id, 0),
+        sellerId: row.seller_id,
+        sellerName: seller.username || 'Miner',
+        sellerLevel: toInt(seller.level, 1),
+        oreId: row.ore_id,
+        mineId: row.mine_id,
+        quantity,
+        unitValue: toInt(row.unit_value, 1),
+        priceEach,
+        total: quantity * priceEach,
+        createdAt: row.created_at
+      };
+    })
+    .filter(item => ORES[item.oreId] && MINES[item.mineId] && item.quantity > 0);
+}
+
+async function createBazaarListing(player, body) {
+  const oreId = String(body && body.oreId || '');
+  const mineId = String(body && body.mineId || '');
+  const quantity = toInt(body && body.quantity, 0);
+  const priceEach = toInt(body && body.priceEach, 0);
+  if (!ORES[oreId] || !MINES[mineId]) throw new GameError('invalid_payload');
+  const key = inventoryKey(oreId, mineId);
+  const stack = player.inventory.get(key);
+  if (!stack) throw new GameError('inventory_empty', 409);
+  if (quantity < 1 || quantity > stack.quantity || quantity > 9999) throw new GameError('invalid_quantity');
+  if (priceEach < 1 || priceEach > 1000000000) throw new GameError('invalid_payload');
+  const data = await rpc('create_listing', {
+    p_user: player.id,
+    p_ore_id: oreId,
+    p_mine_id: mineId,
+    p_quantity: quantity,
+    p_price_each: priceEach
+  });
+  const row = firstRow(data);
+  if (!row) throw new GameError('server_error');
+  const remaining = stack.quantity - quantity;
+  if (remaining <= 0) player.inventory.delete(key);
+  else stack.quantity = Math.max(0, remaining);
+  syncWealth(player);
+  return { listingId: toInt(row.listing_id, 0), quantity };
+}
+
+async function cancelBazaarListing(player, listingId) {
+  const id = toInt(listingId, 0);
+  if (id < 1) throw new GameError('invalid_payload');
+  const data = await rpc('cancel_listing', { p_user: player.id, p_listing_id: id });
+  const row = firstRow(data);
+  if (!row) throw new GameError('server_error');
+  const oreId = String(row.ore_id || '');
+  const mineId = String(row.mine_id || '');
+  const quantity = toInt(row.quantity, 0);
+  const unitValue = Math.max(1, toInt(row.unit_value, 1));
+  if (ORES[oreId] && MINES[mineId] && quantity > 0) {
+    const key = inventoryKey(oreId, mineId);
+    const stack = player.inventory.get(key);
+    if (stack) stack.quantity += quantity;
+    else player.inventory.set(key, { oreId, mineId, quantity, unitValue });
+  }
+  syncWealth(player);
+  return { cancelled: true };
+}
+
+async function buyBazaarListing(player, listingId) {
+  const id = toInt(listingId, 0);
+  if (id < 1) throw new GameError('invalid_payload');
+  const { data: listing, error: listingError } = await supabase
+    .from('market_listings')
+    .select('id,seller_id,ore_id,mine_id,quantity,unit_value,price_each')
+    .eq('id', id)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (listingError) throw listingError;
+  if (!listing) throw new GameError('listing_not_found', 404);
+  const sellerId = listing.seller_id;
+  const oreId = listing.ore_id;
+  const mineId = listing.mine_id;
+  const quantity = toInt(listing.quantity, 0);
+  const unitValue = Math.max(1, toInt(listing.unit_value, 1));
+  const total = quantity * toInt(listing.price_each, 0);
+
+  const data = await rpc('buy_listing', { p_user: player.id, p_listing_id: id });
+  const row = firstRow(data);
+  if (!row) throw new GameError('server_error');
+  player.coins = Math.max(0, toInt(row.coins, player.coins));
+  player.stats.coinsSpent += total;
+  if (ORES[oreId] && MINES[mineId] && quantity > 0) {
+    const key = inventoryKey(oreId, mineId);
+    const stack = player.inventory.get(key);
+    if (stack) stack.quantity += quantity;
+    else player.inventory.set(key, { oreId, mineId, quantity, unitValue });
+  }
+  syncWealth(player);
+  scheduleAchievements(player);
+  await syncRemotePlayer(sellerId);
+  emitToUser(sellerId, 'bazaar:sold', {
+    listingId: id,
+    oreId,
+    mineId,
+    quantity,
+    total,
+    buyerName: player.username
+  });
+  return { bought: true, listingId: id, oreId, mineId, quantity, total };
+}
+
+async function searchPlayers(player, query) {
+  const q = String(query || '').trim().slice(0, 24);
+  if (q.length < 2) return { results: [] };
+  const data = await rpc('search_players', { p_user: player.id, p_query: q });
+  const rows = Array.isArray(data) ? data : [];
+  const online = new Set(onlinePlayerIds());
+  return {
+    results: rows.map(row => ({
+      userId: row.user_id,
+      username: row.username,
+      level: toInt(row.level, 1),
+      online: online.has(row.user_id),
+      isSelf: false
+    }))
+  };
+}
+
+async function listFriends(player) {
+  const data = await rpc('list_friends', { p_user: player.id });
+  const rows = Array.isArray(data) ? data : [];
+  const online = new Set(onlinePlayerIds());
+  return {
+    friends: rows.map(row => ({
+      userId: row.friend_id,
+      username: row.username,
+      level: toInt(row.level, 1),
+      online: online.has(row.friend_id),
+      relation: row.relation
+    }))
+  };
+}
+
+async function resolveTargetUserId(player, body) {
+  const userId = String(body && body.userId || '');
+  if (/^[0-9a-f-]{36}$/i.test(userId)) return userId;
+  const username = String(body && body.username || '').trim();
+  if (!USERNAME_RE.test(username)) throw new GameError('invalid_target');
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('username', username)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new GameError('unknown_player', 404);
+  return data.id;
+}
+
+async function sendFriendRequest(player, body) {
+  const targetId = await resolveTargetUserId(player, body);
+  const data = await rpc('send_friend_request', { p_user: player.id, p_target: targetId });
+  const row = firstRow(data);
+  const status = row ? String(row.status || 'pending') : 'pending';
+  if (status === 'pending') {
+    const { data: target } = await supabase
+      .from('profiles').select('username,level').eq('id', targetId).maybeSingle();
+    emitToUser(targetId, 'friend:request', {
+      from: { userId: player.id, username: player.username, level: player.level }
+    });
+    return { status, targetId, targetName: target ? target.username : null };
+  }
+  return { status, targetId };
+}
+
+async function respondFriendRequest(player, body) {
+  const requesterId = await resolveTargetUserId(player, body);
+  const accept = Boolean(body && body.accept);
+  await rpc('respond_friend_request', {
+    p_user: player.id,
+    p_requester: requesterId,
+    p_accept: accept
+  });
+  emitToUser(requesterId, 'friend:update', { accepted: accept });
+  return { status: accept ? 'accepted' : 'removed' };
+}
+
+async function removeFriend(player, body) {
+  const friendId = await resolveTargetUserId(player, body);
+  await rpc('remove_friend', { p_user: player.id, p_friend: friendId });
+  return { removed: true };
+}
+
+async function getTradeRows(player) {
+  const { data: trades, error } = await supabase
+    .from('trades')
+    .select('id,initiator_id,target_id,status,created_at,updated_at')
+    .or(`initiator_id.eq.${player.id},target_id.eq.${player.id}`)
+    .order('updated_at', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  const rows = trades || [];
+  const ids = rows.map(row => row.id);
+  const partyIds = [...new Set(rows.flatMap(row => [row.initiator_id, row.target_id]))];
+  const [itemsRes, profilesRes] = await Promise.all([
+    ids.length
+      ? supabase.from('trade_items').select('trade_id,user_id,ore_id,mine_id,quantity').in('trade_id', ids)
+      : Promise.resolve({ data: [], error: null }),
+    partyIds.length
+      ? supabase.from('profiles').select('id,username,level').in('id', partyIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+  if (itemsRes.error) throw itemsRes.error;
+  if (profilesRes.error) throw profilesRes.error;
+  const profiles = new Map((profilesRes.data || []).map(p => [p.id, p]));
+  const itemsByTrade = new Map();
+  for (const item of itemsRes.data || []) {
+    if (!itemsByTrade.has(item.trade_id)) itemsByTrade.set(item.trade_id, []);
+    itemsByTrade.get(item.trade_id).push({
+      userId: item.user_id,
+      oreId: item.ore_id,
+      mineId: item.mine_id,
+      quantity: toInt(item.quantity, 0)
+    });
+  }
+  const online = new Set(onlinePlayerIds());
+  return rows.map(row => {
+    const initiator = profiles.get(row.initiator_id) || {};
+    const target = profiles.get(row.target_id) || {};
+    const items = itemsByTrade.get(row.id) || [];
+    return {
+      id: toInt(row.id, 0),
+      status: row.status,
+      initiatorId: row.initiator_id,
+      targetId: row.target_id,
+      initiatorName: initiator.username || 'Miner',
+      targetName: target.username || 'Miner',
+      initiatorLevel: toInt(initiator.level, 1),
+      targetLevel: toInt(target.level, 1),
+      initiatorOnline: online.has(row.initiator_id),
+      targetOnline: online.has(row.target_id),
+      mySide: row.initiator_id === player.id ? 'initiator' : 'target',
+      iAmTarget: row.target_id === player.id,
+      items,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  });
+}
+
+async function proposeTrade(player, body) {
+  const targetId = await resolveTargetUserId(player, body);
+  const data = await rpc('create_trade', { p_user: player.id, p_target: targetId });
+  const row = firstRow(data);
+  if (!row) throw new GameError('server_error');
+  const tradeId = toInt(row.trade_id, 0);
+  const { data: target } = await supabase
+    .from('profiles').select('username,level').eq('id', targetId).maybeSingle();
+  emitToUser(targetId, 'trade:invite', {
+    tradeId,
+    from: { userId: player.id, username: player.username, level: player.level }
+  });
+  return {
+    tradeId,
+    status: String(row.status || 'pending'),
+    targetId,
+    targetName: target ? target.username : null
+  };
+}
+
+async function setTradeOffer(player, body) {
+  const tradeId = toInt(body && body.tradeId, 0);
+  if (tradeId < 1) throw new GameError('invalid_payload');
+  const items = Array.isArray(body && body.items) ? body.items : [];
+  const clean = [];
+  for (const item of items.slice(0, 50)) {
+    const oreId = String(item && item.oreId || '');
+    const mineId = String(item && item.mineId || '');
+    const quantity = toInt(item && item.quantity, 0);
+    if (!oresValidForTrade(oreId, mineId)) continue;
+    if (quantity < 1 || quantity > 9999) continue;
+    // can't offer more than you own
+    const key = inventoryKey(oreId, mineId);
+    const stack = player.inventory.get(key);
+    const already = clean.filter(c => c.oreId === oreId && c.mineId === mineId)
+      .reduce((a, c) => a + c.quantity, 0);
+    const owned = stack ? stack.quantity : 0;
+    if (already + quantity > owned) throw new GameError('insufficient_ore', 409);
+    clean.push({ ore_id: oreId, mine_id: mineId, quantity });
+  }
+  const data = await rpc('set_trade_offer', {
+    p_user: player.id,
+    p_trade_id: tradeId,
+    p_items: clean
+  });
+  const row = firstRow(data);
+  const other = await otherTradeParty(player.id, tradeId);
+  if (other) emitToUser(other, 'trade:updated', { tradeId });
+  return { tradeId, itemCount: row ? toInt(row.item_count, clean.length) : clean.length };
+}
+
+function oresValidForTrade(oreId, mineId) {
+  return Boolean(ORES[oreId] && MINES[mineId]);
+}
+
+async function otherTradeParty(userId, tradeId) {
+  const { data, error } = await supabase
+    .from('trades')
+    .select('initiator_id,target_id')
+    .eq('id', tradeId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data.initiator_id === userId ? data.target_id : data.initiator_id;
+}
+
+async function acceptTrade(player, body) {
+  const tradeId = toInt(body && body.tradeId, 0);
+  if (tradeId < 1) throw new GameError('invalid_payload');
+  const parties = await tradeParties(tradeId);
+  await rpc('accept_trade', { p_user: player.id, p_trade_id: tradeId });
+  const otherId = parties ? (parties.initiator_id === player.id ? parties.target_id : parties.initiator_id) : null;
+  await refreshPlayerState(player);
+  emitPlayerUpdate(player);
+  if (otherId) {
+    await syncRemotePlayer(otherId);
+    emitToUser(otherId, 'trade:completed', { tradeId });
+    emitToUser(player.id, 'trade:completed', { tradeId });
+  }
+  return { completed: true, tradeId };
+}
+
+async function tradeParties(tradeId) {
+  const { data, error } = await supabase
+    .from('trades')
+    .select('initiator_id,target_id,status')
+    .eq('id', tradeId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function cancelTrade(player, body) {
+  const tradeId = toInt(body && body.tradeId, 0);
+  if (tradeId < 1) throw new GameError('invalid_payload');
+  await rpc('cancel_trade', { p_user: player.id, p_trade_id: tradeId });
+  const otherId = await otherTradeParty(player.id, tradeId);
+  if (otherId) emitToUser(otherId, 'trade:updated', { tradeId, status: 'cancelled' });
+  return { cancelled: true, tradeId };
+}
+
+app.get('/api/bazaar', requireAuth, async (req, res) => {
+  try {
+    res.json({ ok: true, listings: await listBazaarItems() });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/bazaar/list', requireAuth, (req, res) => {
+  withPlayer(req, res, player => createBazaarListing(player, req.body));
+});
+
+app.post('/api/bazaar/cancel', requireAuth, (req, res) => {
+  withPlayer(req, res, player => cancelBazaarListing(player, req.body && req.body.listingId));
+});
+
+app.post('/api/bazaar/buy', requireAuth, (req, res) => {
+  withPlayer(req, res, player => buyBazaarListing(player, req.body && req.body.listingId));
+});
+
+app.get('/api/players/search', requireAuth, (req, res) => {
+  withPlayer(req, res, player => searchPlayers(player, req.query.q));
+});
+
+app.get('/api/players/friends', requireAuth, (req, res) => {
+  withPlayer(req, res, player => listFriends(player));
+});
+
+app.post('/api/friends/request', requireAuth, (req, res) => {
+  withPlayer(req, res, player => sendFriendRequest(player, req.body));
+});
+
+app.post('/api/friends/respond', requireAuth, (req, res) => {
+  withPlayer(req, res, player => respondFriendRequest(player, req.body));
+});
+
+app.post('/api/friends/remove', requireAuth, (req, res) => {
+  withPlayer(req, res, player => removeFriend(player, req.body));
+});
+
+app.get('/api/trades', requireAuth, (req, res) => {
+  withPlayer(req, res, async player => ({ trades: await getTradeRows(player) }));
+});
+
+app.post('/api/trades/propose', requireAuth, (req, res) => {
+  withPlayer(req, res, player => proposeTrade(player, req.body));
+});
+
+app.post('/api/trades/offer', requireAuth, (req, res) => {
+  withPlayer(req, res, player => setTradeOffer(player, req.body));
+});
+
+app.post('/api/trades/accept', requireAuth, (req, res) => {
+  withPlayer(req, res, player => acceptTrade(player, req.body));
+});
+
+app.post('/api/trades/cancel', requireAuth, (req, res) => {
+  withPlayer(req, res, player => cancelTrade(player, req.body));
+});
 
 function findRoomForMine(mineId) {
   let emptyRoom = null;

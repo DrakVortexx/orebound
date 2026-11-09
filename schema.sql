@@ -131,6 +131,70 @@ create table if not exists public.reward_events (
 create index if not exists reward_events_user_idx on public.reward_events (user_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
+-- Social / economy tables
+-- ---------------------------------------------------------------------------
+
+-- Bazaar: players list ore stacks for sale. Items are escrowed — they leave
+-- the seller's inventory at listing time and move to the buyer on purchase.
+create table if not exists public.market_listings (
+  id bigserial primary key,
+  seller_id uuid not null references public.profiles(id) on delete cascade,
+  ore_id text not null,
+  mine_id text not null,
+  quantity integer not null check (quantity between 1 and 9999),
+  unit_value bigint not null check (unit_value > 0),
+  price_each bigint not null check (price_each between 1 and 1000000000),
+  status text not null default 'active' check (status in ('active', 'sold', 'cancelled')),
+  buyer_id uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  sold_at timestamptz
+);
+
+create index if not exists market_listings_active_idx
+  on public.market_listings (created_at desc) where status = 'active';
+create index if not exists market_listings_seller_idx on public.market_listings (seller_id);
+
+-- Friends: a single row per relationship direction. 'pending' rows are
+-- requests; 'accepted' rows represent friendships (checked both ways).
+create table if not exists public.friends (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  friend_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted')),
+  created_at timestamptz not null default now(),
+  primary key (user_id, friend_id),
+  check (user_id <> friend_id)
+);
+
+create index if not exists friends_friend_idx on public.friends (friend_id);
+
+-- Trades: two-phase offers. Either party writes their own offer while the
+-- trade is pending; the target accepts to execute an atomic item swap.
+create table if not exists public.trades (
+  id bigserial primary key,
+  initiator_id uuid not null references public.profiles(id) on delete cascade,
+  target_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'completed', 'cancelled')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz,
+  check (initiator_id <> target_id)
+);
+
+create index if not exists trades_pair_idx on public.trades (initiator_id, target_id, status);
+create index if not exists trades_target_idx on public.trades (target_id, status);
+
+create table if not exists public.trade_items (
+  id bigserial primary key,
+  trade_id bigint not null references public.trades(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  ore_id text not null,
+  mine_id text not null,
+  quantity integer not null check (quantity between 1 and 9999)
+);
+
+create index if not exists trade_items_trade_idx on public.trade_items (trade_id);
+
+-- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
 
@@ -802,6 +866,475 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Bazaar RPCs
+-- ---------------------------------------------------------------------------
+
+-- List items for sale. The stack leaves the seller's inventory immediately
+-- (escrow) and keeps its unit value on the listing.
+create or replace function public.create_listing(
+  p_user uuid,
+  p_ore_id text,
+  p_mine_id text,
+  p_quantity integer,
+  p_price_each bigint
+)
+returns table (listing_id bigint, quantity integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_qty integer;
+  v_unit bigint;
+  v_id bigint;
+begin
+  if p_quantity < 1 or p_quantity > 9999 or p_price_each < 1 or p_price_each > 1000000000 then
+    raise exception 'invalid_payload';
+  end if;
+  select i.quantity, i.unit_value into v_qty, v_unit
+  from public.inventory i
+  where i.user_id = p_user and i.ore_id = p_ore_id and i.mine_id = p_mine_id
+  for update;
+  if not found then
+    raise exception 'inventory_empty';
+  end if;
+  if p_quantity > v_qty then
+    raise exception 'invalid_quantity';
+  end if;
+  if p_quantity = v_qty then
+    delete from public.inventory i
+    where i.user_id = p_user and i.ore_id = p_ore_id and i.mine_id = p_mine_id;
+  else
+    update public.inventory i
+    set quantity = i.quantity - p_quantity,
+        updated_at = now()
+    where i.user_id = p_user and i.ore_id = p_ore_id and i.mine_id = p_mine_id;
+  end if;
+  insert into public.market_listings (seller_id, ore_id, mine_id, quantity, unit_value, price_each)
+  values (p_user, p_ore_id, p_mine_id, p_quantity, v_unit, p_price_each)
+  returning id into v_id;
+  return query select v_id, p_quantity;
+end;
+$$;
+
+-- Cancel an active listing and return the items to the seller.
+create or replace function public.cancel_listing(p_user uuid, p_listing_id bigint)
+returns table (ore_id text, mine_id text, quantity integer, unit_value bigint)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v record;
+begin
+  select l.ore_id, l.mine_id, l.quantity, l.unit_value into v
+  from public.market_listings l
+  where l.id = p_listing_id and l.seller_id = p_user and l.status = 'active'
+  for update;
+  if not found then
+    raise exception 'listing_not_found';
+  end if;
+  update public.market_listings l
+  set status = 'cancelled'
+  where l.id = p_listing_id;
+  insert into public.inventory as inv (user_id, ore_id, mine_id, quantity, unit_value, updated_at)
+  values (p_user, v.ore_id, v.mine_id, v.quantity, v.unit_value, now())
+  on conflict (user_id, ore_id, mine_id) do update
+    set quantity = inv.quantity + excluded.quantity,
+        unit_value = excluded.unit_value,
+        updated_at = now();
+  return query select v.ore_id, v.mine_id, v.quantity, v.unit_value;
+end;
+$$;
+
+-- Buy a listing: coins move buyer -> seller, items move to buyer inventory.
+create or replace function public.buy_listing(p_user uuid, p_listing_id bigint)
+returns table (ore_id text, mine_id text, quantity integer, unit_value bigint, total bigint, coins bigint)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v record;
+  v_total bigint;
+  v_coins bigint;
+  v_seller_coins bigint;
+begin
+  select l.seller_id, l.ore_id, l.mine_id, l.quantity, l.unit_value, l.price_each into v
+  from public.market_listings l
+  where l.id = p_listing_id and l.status = 'active'
+  for update;
+  if not found then
+    raise exception 'listing_not_found';
+  end if;
+  if v.seller_id = p_user then
+    raise exception 'own_listing';
+  end if;
+  v_total := v.quantity::bigint * v.price_each;
+  select p.coins into v_coins
+  from public.profiles p
+  where p.id = p_user
+  for update;
+  if not found then
+    raise exception 'unknown_player';
+  end if;
+  if v_coins < v_total then
+    raise exception 'insufficient_coins';
+  end if;
+  update public.market_listings l
+  set status = 'sold', buyer_id = p_user, sold_at = now()
+  where l.id = p_listing_id and l.status = 'active';
+  if not found then
+    raise exception 'listing_not_found';
+  end if;
+  update public.profiles p
+  set coins = p.coins - v_total,
+      updated_at = now()
+  where p.id = p_user
+  returning p.coins into v_coins;
+  update public.profiles p
+  set coins = p.coins + v_total,
+      updated_at = now()
+  where p.id = v.seller_id
+  returning p.coins into v_seller_coins;
+  update public.player_stats s
+  set coins_spent = s.coins_spent + v_total,
+      updated_at = now()
+  where s.user_id = p_user;
+  update public.player_stats s
+  set coins_earned = s.coins_earned + v_total,
+      updated_at = now()
+  where s.user_id = v.seller_id;
+  insert into public.inventory as inv (user_id, ore_id, mine_id, quantity, unit_value, updated_at)
+  values (p_user, v.ore_id, v.mine_id, v.quantity, v.unit_value, now())
+  on conflict (user_id, ore_id, mine_id) do update
+    set quantity = inv.quantity + excluded.quantity,
+        unit_value = excluded.unit_value,
+        updated_at = now();
+  return query select v.ore_id, v.mine_id, v.quantity, v.unit_value, v_total, v_coins;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Friends RPCs
+-- ---------------------------------------------------------------------------
+
+create or replace function public.search_players(p_user uuid, p_query text)
+returns table (user_id uuid, username text, level integer)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.id, p.username, p.level
+  from public.profiles p
+  where p.id <> p_user
+    and char_length(coalesce(p_query, '')) >= 2
+    and p.username ilike '%' || p_query || '%'
+  order by p.username
+  limit 20;
+$$;
+
+create or replace function public.send_friend_request(p_user uuid, p_target uuid)
+returns table (status text, friend_id uuid)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_reverse_status text;
+begin
+  if p_target = p_user then
+    raise exception 'invalid_target';
+  end if;
+  if not exists (select 1 from public.profiles p where p.id = p_target) then
+    raise exception 'unknown_player';
+  end if;
+  if exists (select 1 from public.friends f where f.user_id = p_user and f.friend_id = p_target) then
+    return query select 'already_pending', p_target;
+    return;
+  end if;
+  select f.status into v_reverse_status
+  from public.friends f
+  where f.user_id = p_target and f.friend_id = p_user;
+  if v_reverse_status = 'accepted' then
+    return query select 'already_friends', p_target;
+    return;
+  end if;
+  if v_reverse_status = 'pending' then
+    update public.friends f
+    set status = 'accepted'
+    where f.user_id = p_target and f.friend_id = p_user;
+    return query select 'accepted', p_target;
+    return;
+  end if;
+  insert into public.friends (user_id, friend_id, status)
+  values (p_user, p_target, 'pending');
+  return query select 'pending', p_target;
+end;
+$$;
+
+create or replace function public.respond_friend_request(p_user uuid, p_requester uuid, p_accept boolean)
+returns table (status text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_accept then
+    update public.friends f
+    set status = 'accepted'
+    where f.user_id = p_requester and f.friend_id = p_user and f.status = 'pending';
+    if not found then
+      raise exception 'request_not_found';
+    end if;
+    return query select 'accepted'::text;
+  else
+    delete from public.friends f
+    where f.user_id = p_requester and f.friend_id = p_user and f.status = 'pending';
+    if not found then
+      raise exception 'request_not_found';
+    end if;
+    return query select 'removed'::text;
+  end if;
+end;
+$$;
+
+create or replace function public.remove_friend(p_user uuid, p_friend uuid)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  delete from public.friends f
+  where (f.user_id = p_user and f.friend_id = p_friend)
+     or (f.user_id = p_friend and f.friend_id = p_user);
+$$;
+
+create or replace function public.list_friends(p_user uuid)
+returns table (friend_id uuid, username text, level integer, relation text)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select
+    case when f.user_id = p_user then f.friend_id else f.user_id end as friend_id,
+    p.username,
+    p.level,
+    case
+      when f.status = 'accepted' then 'friend'
+      when f.user_id = p_user then 'outgoing'
+      else 'incoming'
+    end as relation
+  from public.friends f
+  join public.profiles p
+    on p.id = case when f.user_id = p_user then f.friend_id else f.user_id end
+  where f.user_id = p_user or f.friend_id = p_user
+  order by relation, p.username;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Trade RPCs
+-- ---------------------------------------------------------------------------
+
+-- Create a trade, or return the existing pending one between the pair.
+create or replace function public.create_trade(p_user uuid, p_target uuid)
+returns table (trade_id bigint, status text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id bigint;
+  v_status text;
+begin
+  if p_target = p_user then
+    raise exception 'invalid_target';
+  end if;
+  if not exists (select 1 from public.profiles p where p.id = p_target) then
+    raise exception 'unknown_player';
+  end if;
+  select t.id, t.status into v_id, v_status
+  from public.trades t
+  where t.status = 'pending'
+    and ((t.initiator_id = p_user and t.target_id = p_target)
+      or (t.initiator_id = p_target and t.target_id = p_user))
+  limit 1;
+  if v_id is not null then
+    return query select v_id, v_status;
+    return;
+  end if;
+  insert into public.trades (initiator_id, target_id)
+  values (p_user, p_target)
+  returning id into v_id;
+  return query select v_id, 'pending'::text;
+end;
+$$;
+
+-- Replace one side's offer. Items are validated again at accept time.
+create or replace function public.set_trade_offer(p_user uuid, p_trade_id bigint, p_items jsonb)
+returns table (item_count integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_initiator uuid;
+  v_target uuid;
+  v_status text;
+  v_count integer := 0;
+  v_item record;
+begin
+  select t.initiator_id, t.target_id, t.status into v_initiator, v_target, v_status
+  from public.trades t
+  where t.id = p_trade_id
+  for update;
+  if not found then
+    raise exception 'trade_not_found';
+  end if;
+  if v_status <> 'pending' then
+    raise exception 'trade_closed';
+  end if;
+  if p_user <> v_initiator and p_user <> v_target then
+    raise exception 'not_participant';
+  end if;
+  if p_items is not null and jsonb_typeof(p_items) <> 'array' then
+    raise exception 'invalid_payload';
+  end if;
+  if p_items is not null and jsonb_array_length(p_items) > 50 then
+    raise exception 'invalid_payload';
+  end if;
+  delete from public.trade_items ti
+  where ti.trade_id = p_trade_id and ti.user_id = p_user;
+  for v_item in
+    select
+      elem ->> 'ore_id' as ore_id,
+      elem ->> 'mine_id' as mine_id,
+      (elem ->> 'quantity')::integer as quantity
+    from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as elem
+  loop
+    if v_item.quantity < 1 or v_item.quantity > 9999
+       or char_length(coalesce(v_item.ore_id, '')) > 64
+       or char_length(coalesce(v_item.mine_id, '')) > 64 then
+      raise exception 'invalid_payload';
+    end if;
+    insert into public.trade_items (trade_id, user_id, ore_id, mine_id, quantity)
+    values (p_trade_id, p_user, v_item.ore_id, v_item.mine_id, v_item.quantity);
+    v_count := v_count + 1;
+  end loop;
+  update public.trades t
+  set updated_at = now()
+  where t.id = p_trade_id;
+  return query select v_count;
+end;
+$$;
+
+create or replace function public.cancel_trade(p_user uuid, p_trade_id bigint)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.trades t
+  set status = 'cancelled', updated_at = now()
+  where t.id = p_trade_id and t.status = 'pending'
+    and (t.initiator_id = p_user or t.target_id = p_user);
+  if not found then
+    raise exception 'trade_not_found';
+  end if;
+end;
+$$;
+
+-- Target accepts: atomically swap both offers. Any failure rolls back the
+-- whole trade, so a stale offer can never half-complete.
+create or replace function public.accept_trade(p_user uuid, p_trade_id bigint)
+returns table (status text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_initiator uuid;
+  v_target uuid;
+  v_status text;
+  v_item record;
+  v_unit bigint;
+  v_total integer := 0;
+begin
+  select t.initiator_id, t.target_id, t.status into v_initiator, v_target, v_status
+  from public.trades t
+  where t.id = p_trade_id
+  for update;
+  if not found then
+    raise exception 'trade_not_found';
+  end if;
+  if v_status <> 'pending' then
+    raise exception 'trade_closed';
+  end if;
+  if p_user <> v_target then
+    raise exception 'not_authorized';
+  end if;
+  select count(*) into v_total
+  from public.trade_items ti
+  where ti.trade_id = p_trade_id;
+  if v_total = 0 then
+    raise exception 'empty_trade';
+  end if;
+  update public.trades t
+  set status = 'completed', completed_at = now(), updated_at = now()
+  where t.id = p_trade_id;
+
+  for v_item in
+    select ti.user_id as side, ti.ore_id, ti.mine_id, ti.quantity
+    from public.trade_items ti
+    where ti.trade_id = p_trade_id
+  loop
+    select i.unit_value into v_unit
+    from public.inventory i
+    where i.user_id = v_item.side
+      and i.ore_id = v_item.ore_id
+      and i.mine_id = v_item.mine_id;
+    if v_unit is null then
+      raise exception 'insufficient_ore';
+    end if;
+    -- remove from the offering side
+    update public.inventory i
+    set quantity = i.quantity - v_item.quantity,
+        updated_at = now()
+    where i.user_id = v_item.side
+      and i.ore_id = v_item.ore_id
+      and i.mine_id = v_item.mine_id
+      and i.quantity >= v_item.quantity;
+    if not found then
+      raise exception 'insufficient_ore';
+    end if;
+    delete from public.inventory i
+    where i.user_id = v_item.side
+      and i.ore_id = v_item.ore_id
+      and i.mine_id = v_item.mine_id
+      and i.quantity <= 0;
+    -- credit the other side
+    insert into public.inventory as inv (user_id, ore_id, mine_id, quantity, unit_value, updated_at)
+    values (
+      case when v_item.side = v_initiator then v_target else v_initiator end,
+      v_item.ore_id,
+      v_item.mine_id,
+      v_item.quantity,
+      v_unit,
+      now()
+    )
+    on conflict (user_id, ore_id, mine_id) do update
+      set quantity = inv.quantity + excluded.quantity,
+          updated_at = now();
+  end loop;
+
+  return query select 'completed'::text;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
 
@@ -864,6 +1397,10 @@ alter table public.inventory enable row level security;
 alter table public.player_stats enable row level security;
 alter table public.mine_sessions enable row level security;
 alter table public.reward_events enable row level security;
+alter table public.market_listings enable row level security;
+alter table public.friends enable row level security;
+alter table public.trades enable row level security;
+alter table public.trade_items enable row level security;
 
 drop policy if exists profiles_read on public.profiles;
 create policy profiles_read on public.profiles for select to authenticated using (true);
@@ -883,11 +1420,31 @@ create policy mine_sessions_read on public.mine_sessions for select to authentic
 drop policy if exists reward_events_read on public.reward_events;
 create policy reward_events_read on public.reward_events for select to authenticated using ((select auth.uid()) = user_id);
 
+drop policy if exists market_listings_read on public.market_listings;
+create policy market_listings_read on public.market_listings for select to authenticated using (true);
+
+drop policy if exists friends_read on public.friends;
+create policy friends_read on public.friends for select to authenticated
+  using ((select auth.uid()) = user_id or (select auth.uid()) = friend_id);
+
+drop policy if exists trades_read on public.trades;
+create policy trades_read on public.trades for select to authenticated
+  using ((select auth.uid()) = initiator_id or (select auth.uid()) = target_id);
+
+drop policy if exists trade_items_read on public.trade_items;
+create policy trade_items_read on public.trade_items for select to authenticated
+  using (exists (
+    select 1 from public.trades t
+    where t.id = trade_items.trade_id
+      and ((select auth.uid()) = t.initiator_id or (select auth.uid()) = t.target_id)
+  ));
+
 grant usage on schema public to anon, authenticated, service_role;
 revoke all on all tables in schema public from anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 grant select on public.profiles, public.player_unlocks, public.inventory,
-  public.player_stats, public.mine_sessions, public.reward_events to authenticated;
+  public.player_stats, public.mine_sessions, public.reward_events,
+  public.market_listings, public.friends, public.trades, public.trade_items to authenticated;
 grant select on public.leaderboard to authenticated;
 grant all on all tables in schema public to service_role;
 grant all on all sequences in schema public to service_role;
