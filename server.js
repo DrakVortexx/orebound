@@ -370,9 +370,52 @@ function asGameError(error) {
     level: 'error',
     message: 'unhandled_error',
     detail: raw,
+    db: describeDbError(error),
     stack: error && error.stack
   }));
   return new GameError('server_error', 500);
+}
+
+function describeDbError(error) {
+  if (!error) return null;
+  return {
+    code: error.code || null,
+    message: error.message || String(error),
+    details: error.details || null,
+    hint: error.hint || null
+  };
+}
+
+// True when the live database is missing a table/function/column — usually
+// because schema.sql has not been (re)applied or PostgREST still has a stale
+// schema cache. Those errors can be worked around with direct table writes.
+function isSchemaMissing(error) {
+  if (!error) return false;
+  const code = String(error.code || '');
+  const message = String(error.message || error.details || '');
+  return code === 'PGRST202' ||
+    code === 'PGRST204' ||
+    code === '42883' ||
+    code === '42P01' ||
+    code === '42703' ||
+    /could not find the function|does not exist in the schema|could not find the table|relation .* does not exist|column .* does not exist/i.test(message);
+}
+
+async function bumpPlayerStat(userId, column, amount) {
+  const step = toInt(amount, 0);
+  if (!step) return;
+  const { data, error } = await supabase
+    .from('player_stats')
+    .select(column)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return;
+  const { error: updateError } = await supabase
+    .from('player_stats')
+    .update({ [column]: Math.max(0, toInt(data[column], 0) + step), updated_at: new Date().toISOString() })
+    .eq('user_id', userId);
+  if (updateError) throw updateError;
 }
 
 function sendError(res, error) {
@@ -418,19 +461,65 @@ function defaultStats() {
   };
 }
 
+async function loadUnlockRows(userId) {
+  const primary = await supabase
+    .from('player_unlocks')
+    .select('kind,ref_id,quantity')
+    .eq('user_id', userId);
+  if (primary.error && !isSchemaMissing(primary.error)) throw primary.error;
+  const primaryRows = primary.error ? [] : (primary.data || []);
+  if (primaryRows.length) return primaryRows;
+
+  // Older schema support: migrate legacy per-kind tables on the fly so the
+  // game keeps working until schema.sql is re-run.
+  const legacy = [
+    ['pickaxe', 'player_pickaxes', 'pickaxe_id', null],
+    ['mine', 'player_mines', 'mine_id', null],
+    ['achievement', 'player_achievements', 'achievement_id', null],
+    ['consumable', 'player_consumables', 'consumable_id', 'quantity']
+  ];
+  const rows = [];
+  let foundLegacy = false;
+  for (const [kind, table, refColumn, quantityColumn] of legacy) {
+    const columns = quantityColumn ? `ref_id:${refColumn},quantity` : `ref_id:${refColumn}`;
+    const { data, error } = await supabase.from(table).select(columns).eq('user_id', userId);
+    if (error) {
+      if (isSchemaMissing(error)) continue;
+      throw error;
+    }
+    foundLegacy = true;
+    for (const row of data || []) {
+      rows.push({
+        kind,
+        ref_id: row.ref_id,
+        quantity: quantityColumn ? row.quantity : 1
+      });
+    }
+  }
+  if (foundLegacy) {
+    console.warn(JSON.stringify({
+      level: 'warn',
+      message: 'legacy_schema_detected',
+      detail: 'player_unlocks is unavailable or empty; using legacy unlock tables. Re-run schema.sql to upgrade the database.'
+    }));
+  }
+  return rows;
+}
+
 async function loadPlayerState(userId) {
-  const [profileRes, statsRes, inventoryRes, unlocksRes] = await Promise.all([
+  const [profileRes, statsRes, inventoryRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
     supabase.from('player_stats').select('*').eq('user_id', userId).maybeSingle(),
-    supabase.from('inventory').select('ore_id,mine_id,quantity,unit_value').eq('user_id', userId),
-    supabase.from('player_unlocks').select('kind,ref_id,quantity').eq('user_id', userId)
+    supabase.from('inventory').select('ore_id,mine_id,quantity,unit_value').eq('user_id', userId)
   ]);
 
-  for (const result of [profileRes, statsRes, inventoryRes, unlocksRes]) {
+  for (const result of [profileRes, statsRes, inventoryRes]) {
     if (result.error) throw result.error;
   }
 
   if (!profileRes.data) throw new GameError('profile_missing', 409);
+
+  const unlockRows = await loadUnlockRows(userId);
 
   const profile = profileRes.data;
   const inventory = new Map();
@@ -449,7 +538,7 @@ async function loadPlayerState(userId) {
   const mines = new Set();
   const consumables = new Map(CONSUMABLE_ORDER.map(id => [id, 0]));
   const achievements = new Set();
-  for (const row of unlocksRes.data || []) {
+  for (const row of unlockRows) {
     if (row.kind === 'pickaxe' && PICKAXES[row.ref_id]) pickaxes.add(row.ref_id);
     else if (row.kind === 'mine' && MINES[row.ref_id]) mines.add(row.ref_id);
     else if (row.kind === 'consumable' && CONSUMABLES[row.ref_id]) consumables.set(row.ref_id, Math.max(0, toInt(row.quantity, 0)));
@@ -1569,6 +1658,42 @@ function emitPlayerUpdate(player) {
   io.to('user:' + player.id).emit('player:update', { player: publicPlayer(player) });
 }
 
+async function startSessionFallback(player, mineId) {
+  const { data, error } = await supabase
+    .from('mine_sessions')
+    .insert({ user_id: player.id, mine_id: mineId })
+    .select('id');
+  if (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      message: 'start_session_fallback_failed',
+      userId: player.id,
+      mineId,
+      db: describeDbError(error)
+    }));
+    return Date.now();
+  }
+  const row = firstRow(data);
+  const id = toInt(row && row.id, 0);
+  if (id) {
+    await bumpPlayerStat(player.id, 'sessions', 1).catch(statError => {
+      console.error(JSON.stringify({
+        level: 'error',
+        message: 'start_session_stat_failed',
+        userId: player.id,
+        db: describeDbError(statError)
+      }));
+    });
+  }
+  console.warn(JSON.stringify({
+    level: 'warn',
+    message: 'start_session_fallback_used',
+    userId: player.id,
+    mineId
+  }));
+  return id || Date.now();
+}
+
 async function joinMine(player, payload) {
   const mineId = String(payload && payload.mineId || '');
   const mine = MINES[mineId];
@@ -1577,12 +1702,33 @@ async function joinMine(player, payload) {
   if (player.roomId) await leaveMine(player, 'switch');
 
   if (player.currentMine !== mineId) {
-    await rpc('select_mine', { p_user: player.id, p_mine_id: mineId });
+    try {
+      await rpc('select_mine', { p_user: player.id, p_mine_id: mineId });
+    } catch (error) {
+      if (!isSchemaMissing(error)) throw error;
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ current_mine: mineId, updated_at: new Date().toISOString() })
+        .eq('id', player.id);
+      if (updateError) throw updateError;
+      console.warn(JSON.stringify({
+        level: 'warn',
+        message: 'select_mine_fallback_used',
+        userId: player.id,
+        mineId
+      }));
+    }
     player.currentMine = mineId;
   }
 
   const room = findRoomForMine(mineId);
-  const sessionId = toInt(await rpc('start_mine_session', { p_user: player.id, p_mine_id: mineId }), 0);
+  let sessionId = 0;
+  try {
+    sessionId = toInt(await rpc('start_mine_session', { p_user: player.id, p_mine_id: mineId }), 0);
+  } catch (error) {
+    if (!isSchemaMissing(error)) throw error;
+    sessionId = await startSessionFallback(player, mineId);
+  }
   if (!sessionId) throw new GameError('server_error');
 
   player.roomId = room.id;
@@ -2079,6 +2225,76 @@ async function useConsumable(player, consumableId) {
   return { consumableId, quantity, until };
 }
 
+async function sellInventoryItemFallback(player, oreId, mineId, quantity) {
+  const { data: stack, error } = await supabase
+    .from('inventory')
+    .select('quantity,unit_value')
+    .eq('user_id', player.id)
+    .eq('ore_id', oreId)
+    .eq('mine_id', mineId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!stack) throw new GameError('inventory_empty', 409);
+  const available = Math.max(0, toInt(stack.quantity, 0));
+  const sold = Math.min(quantity, available);
+  if (sold < 1) throw new GameError('inventory_empty', 409);
+  const total = sold * Math.max(1, toInt(stack.unit_value, 1));
+
+  if (sold >= available) {
+    const { error: deleteError } = await supabase
+      .from('inventory')
+      .delete()
+      .eq('user_id', player.id)
+      .eq('ore_id', oreId)
+      .eq('mine_id', mineId);
+    if (deleteError) throw deleteError;
+  } else {
+    const { error: updateError } = await supabase
+      .from('inventory')
+      .update({ quantity: available - sold, updated_at: new Date().toISOString() })
+      .eq('user_id', player.id)
+      .eq('ore_id', oreId)
+      .eq('mine_id', mineId);
+    if (updateError) throw updateError;
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('coins')
+    .eq('id', player.id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  if (!profile) throw new GameError('profile_missing', 409);
+  const coins = Math.max(0, toInt(profile.coins, 0)) + total;
+  const { error: coinsError } = await supabase
+    .from('profiles')
+    .update({ coins, updated_at: new Date().toISOString() })
+    .eq('id', player.id);
+  if (coinsError) throw coinsError;
+
+  try {
+    await bumpPlayerStat(player.id, 'ores_sold', sold);
+    await bumpPlayerStat(player.id, 'coins_earned', total);
+  } catch (statError) {
+    console.error(JSON.stringify({
+      level: 'error',
+      message: 'sell_fallback_stat_failed',
+      userId: player.id,
+      db: describeDbError(statError)
+    }));
+  }
+
+  console.warn(JSON.stringify({
+    level: 'warn',
+    message: 'sell_fallback_used',
+    userId: player.id,
+    oreId,
+    mineId,
+    sold
+  }));
+  return { sold, total, coins };
+}
+
 async function sellInventoryItem(player, oreId, mineId, quantity) {
   if (!ORES[oreId] || !MINES[mineId]) throw new GameError('invalid_payload');
   const amount = toInt(quantity, 0);
@@ -2086,12 +2302,18 @@ async function sellInventoryItem(player, oreId, mineId, quantity) {
   const key = inventoryKey(oreId, mineId);
   const current = player.inventory.get(key);
   if (!current) throw new GameError('inventory_empty', 409);
-  const data = await rpc('sell_inventory_item', {
-    p_user: player.id,
-    p_ore_id: oreId,
-    p_mine_id: mineId,
-    p_quantity: Math.min(amount, current.quantity)
-  });
+  let data;
+  try {
+    data = await rpc('sell_inventory_item', {
+      p_user: player.id,
+      p_ore_id: oreId,
+      p_mine_id: mineId,
+      p_quantity: Math.min(amount, current.quantity)
+    });
+  } catch (error) {
+    if (!isSchemaMissing(error)) throw error;
+    data = [await sellInventoryItemFallback(player, oreId, mineId, Math.min(amount, current.quantity))];
+  }
   const row = firstRow(data);
   if (!row) throw new GameError('server_error');
 
