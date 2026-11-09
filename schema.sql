@@ -154,6 +154,8 @@ begin
 end;
 $$;
 
+-- Wealth is the coin balance only (leaderboard ranking). Inventory value
+-- is tracked separately as a stat, not part of wealth.
 create or replace function public.recompute_wealth(p_user uuid)
 returns void
 language sql
@@ -161,32 +163,9 @@ security definer
 set search_path = ''
 as $$
   update public.profiles p
-  set wealth = p.coins + coalesce((
-        select sum(i.quantity::bigint * i.unit_value)
-        from public.inventory i
-        where i.user_id = p_user
-      ), 0)::bigint,
+  set wealth = p.coins,
       updated_at = now()
   where p.id = p_user;
-$$;
-
-create or replace function public.inventory_wealth()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-begin
-  if tg_op = 'DELETE' then
-    perform public.recompute_wealth(old.user_id);
-    return old;
-  end if;
-  if tg_op = 'UPDATE' and old.user_id is distinct from new.user_id then
-    perform public.recompute_wealth(old.user_id);
-  end if;
-  perform public.recompute_wealth(new.user_id);
-  return new;
-end;
 $$;
 
 create or replace function public.profiles_wealth()
@@ -835,8 +814,7 @@ create trigger inventory_touch before update on public.inventory
 for each row execute function public.touch_updated_at();
 
 drop trigger if exists inventory_wealth_change on public.inventory;
-create trigger inventory_wealth_change after insert or update or delete on public.inventory
-for each row execute function public.inventory_wealth();
+drop function if exists public.inventory_wealth();
 
 drop trigger if exists profiles_wealth_change on public.profiles;
 create trigger profiles_wealth_change after update of coins on public.profiles
@@ -853,6 +831,9 @@ for each row execute function public.touch_updated_at();
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
 for each row execute function public.handle_new_user();
+
+-- One-time backfill: wealth is now coins only.
+update public.profiles set wealth = coins where wealth <> coins;
 
 -- ---------------------------------------------------------------------------
 -- Leaderboard

@@ -313,14 +313,8 @@ function inventoryCount(player) {
   return total;
 }
 
-function inventoryValue(player) {
-  let total = 0;
-  for (const item of player.inventory.values()) total += item.quantity * item.unitValue;
-  return total;
-}
-
 function syncWealth(player) {
-  player.wealth = player.coins + inventoryValue(player);
+  player.wealth = player.coins;
 }
 
 function weightedPick(weights) {

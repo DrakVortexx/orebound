@@ -1676,7 +1676,7 @@ const stackKey = (s) => `${s.oreId}|${s.mineId}|${s.value}`;
 const inventoryCount = () => state.inventory.reduce((a, s) => a + s.qty, 0);
 const inventoryValue = () => state.inventory.reduce((a, s) => a + s.qty * s.value, 0);
 const currentMine = () => getMine(state.currentMine);
-const playerWealth = () => state.coins + inventoryValue();
+const playerWealth = () => state.coins;
 
 function addOre(oreId, mineId, qty = 1) {
   const value = oreUnitValue(oreId, mineId);
