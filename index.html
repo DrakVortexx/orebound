@@ -794,6 +794,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const TAU = Math.PI * 2;
+const LIGHT_SCALE = 0.5;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (a = 0, b = 1) => a + Math.random() * (b - a);
@@ -1448,8 +1449,10 @@ function mpSnapshot(snap) {
     }
     mpRemoteUpsert(p);
   }
+  const existingDrops = new Map();
+  for (const x of game.drops) if (x.id) existingDrops.set(x.id, x);
   for (const d of snap.drops || []) {
-    let drop = game.drops.find(x => x.id === d.id);
+    let drop = existingDrops.get(d.id);
     if (!drop) {
       drop = { id: d.id, r: rand(9, 12), bob: rand(0, TAU), vx: 0, vy: 0, age: 0 };
       game.drops.push(drop);
@@ -1586,6 +1589,7 @@ async function mpJoinRoom(mineId) {
       mp.roomId = ack.roomId;
       mp.selfId = ack.selfId;
       game.deposits = (ack.deposits || []).map(mpDepositFromServer);
+      for (const d of game.deposits) depositSprite(d);
       game.drops = (ack.drops || []).map(mpDropFromServer);
       mp.remotePlayers.clear();
       for (const p of ack.players || []) mpRemoteUpsert(p);
@@ -3328,9 +3332,144 @@ function resizeCanvas() {
   game.canvas.height = Math.floor(H * dpr);
   game.canvas.style.width = W + 'px';
   game.canvas.style.height = H + 'px';
-  game.lightCanvas.width = Math.max(1, Math.floor(W));
-  game.lightCanvas.height = Math.max(1, Math.floor(H));
+  game.lightCanvas.width = Math.max(1, Math.floor(W * LIGHT_SCALE));
+  game.lightCanvas.height = Math.max(1, Math.floor(H * LIGHT_SCALE));
   if (game.ctx) game.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// ------------------------------------------------------------
+// RENDER CACHES — avoid rebuilding gradients/shapes every frame
+// ------------------------------------------------------------
+const spriteCache = new Map();
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(w));
+  c.height = Math.max(1, Math.ceil(h));
+  return c;
+}
+function glowSprite(color, midAlpha = 0.35, midPos = 0.55) {
+  const key = `glow|${color}|${midAlpha}|${midPos}`;
+  let c = spriteCache.get(key);
+  if (c) return c;
+  const size = 128, r = size / 2;
+  c = makeCanvas(size, size);
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, rgba(color, 1));
+  grad.addColorStop(midPos, rgba(color, midAlpha));
+  grad.addColorStop(1, rgba(color, 0));
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  spriteCache.set(key, c);
+  return c;
+}
+let _lightHole = null;
+function lightHoleSprite() {
+  if (_lightHole) return _lightHole;
+  const size = 128, r = size / 2;
+  _lightHole = makeCanvas(size, size);
+  const g = _lightHole.getContext('2d');
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, 'rgba(0,0,0,1)');
+  grad.addColorStop(0.5, 'rgba(0,0,0,.6)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return _lightHole;
+}
+function inView(x, y, pad) {
+  const v = game.view;
+  return x + pad >= v.x0 && x - pad <= v.x1 && y + pad >= v.y0 && y - pad <= v.y1;
+}
+function depositSprite(d) {
+  const ore = d.oreId ? ORES[d.oreId] : null;
+  const key = `${game.mine.theme}|${d.seed}|${d.oreId || 'stone'}|${d.r.toFixed(2)}`;
+  if (d._sprite && d._spriteKey === key) return d._sprite;
+  const pad = Math.ceil(d.r * 1.6) + 8;
+  const size = pad * 2;
+  const c = makeCanvas(size, size);
+  const g = c.getContext('2d');
+  g.translate(pad, pad);
+  const rng = mulberry32(d.seed);
+  const pal = ROCK_PALETTES[game.mine.theme] || ROCK_PALETTES.mossy;
+
+  const lumps = [];
+  for (let i = 0; i < 3; i++) {
+    const a = rng() * TAU;
+    lumps.push({ x: Math.cos(a) * d.r * 0.45, y: Math.sin(a) * d.r * 0.3, r: d.r * (0.34 + rng() * 0.24) });
+  }
+  for (const l of lumps) {
+    const lg = g.createRadialGradient(l.x - l.r * 0.3, l.y - l.r * 0.4, 0, l.x, l.y, l.r);
+    lg.addColorStop(0, pal[0]);
+    lg.addColorStop(0.7, pal[1]);
+    lg.addColorStop(1, pal[2]);
+    g.fillStyle = lg;
+    g.beginPath(); g.arc(l.x, l.y, l.r, 0, TAU); g.fill();
+  }
+
+  const pts = [];
+  const n = 11;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU;
+    const rr = d.r * (0.82 + rng() * 0.26);
+    pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.82]);
+  }
+  const bodyGrad = g.createLinearGradient(-d.r, -d.r, d.r * 0.8, d.r);
+  bodyGrad.addColorStop(0, pal[0]);
+  bodyGrad.addColorStop(0.5, pal[1]);
+  bodyGrad.addColorStop(1, pal[2]);
+  g.fillStyle = bodyGrad;
+  g.beginPath();
+  g.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.38)';
+  g.lineWidth = 2;
+  g.stroke();
+
+  g.save();
+  g.clip();
+  const hl = g.createLinearGradient(0, -d.r, 0, d.r * 0.2);
+  hl.addColorStop(0, 'rgba(255,255,255,.17)');
+  hl.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = hl;
+  g.fillRect(-d.r * 1.3, -d.r * 1.3, d.r * 2.6, d.r * 1.6);
+  g.restore();
+
+  g.strokeStyle = 'rgba(0,0,0,.3)';
+  g.lineWidth = 1.4;
+  for (let i = 0; i < 3; i++) {
+    let x = (rng() - 0.5) * d.r;
+    let y = (rng() - 0.4) * d.r * 0.7;
+    g.beginPath();
+    g.moveTo(x, y);
+    for (let s = 0; s < 3; s++) {
+      x += (rng() - 0.5) * 18;
+      y += (rng() - 0.3) * 14;
+      g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+
+  if (ore) drawOreCrystals(g, d, ore, rng);
+
+  d._sprite = c;
+  d._spriteKey = key;
+  return c;
+}
+function gemSprite(ore) {
+  const key = 'gem|' + ore.id;
+  let c = spriteCache.get(key);
+  if (c) return c;
+  const size = 64, base = 52;
+  c = makeCanvas(size, size);
+  const g = c.getContext('2d');
+  g.translate(size / 2, size / 2);
+  drawGemShape(g, ore, 0, 0, base);
+  c._base = base;
+  spriteCache.set(key, c);
+  return c;
 }
 
 function enterMine() {
@@ -3811,9 +3950,10 @@ function update(dt) {
 }
 
 function updateRemotePlayers(dt) {
+  const k = 1 - Math.exp(-dt * 12);
   for (const rp of mp.remotePlayers.values()) {
-    rp.x = lerp(rp.x === undefined ? rp.tx : rp.x, rp.tx, 0.35);
-    rp.y = lerp(rp.y === undefined ? rp.ty : rp.y, rp.ty, 0.35);
+    rp.x = lerp(rp.x === undefined ? rp.tx : rp.x, rp.tx, k);
+    rp.y = lerp(rp.y === undefined ? rp.ty : rp.y, rp.ty, k);
     rp.walk = (rp.walk || 0) + dt * ((rp.moving || rp.mining) ? 9 : 1.5);
   }
 }
@@ -3868,12 +4008,16 @@ function updatePlayer(dt) {
   p.walk += dt * (p.moving ? 9 + Math.hypot(p.vx, p.vy) * 0.012 : 1.5);
 
   if (mp.selfServer) {
-    const err = dist(p.x, p.y, mp.selfServer.x, mp.selfServer.y);
-    if (err > 160) {
+    const dx = mp.selfServer.x - p.x, dy = mp.selfServer.y - p.y;
+    const err = Math.hypot(dx, dy);
+    if (err > 180) {
       p.x = mp.selfServer.x; p.y = mp.selfServer.y; p.vx = 0; p.vy = 0;
-    } else if (err > 2) {
-      p.x = lerp(p.x, mp.selfServer.x, 0.3);
-      p.y = lerp(p.y, mp.selfServer.y, 0.3);
+    } else if (err > 40) {
+      // Snapshots arrive ~10x/sec; correcting toward them every frame causes
+      // constant rubber-banding. Only ease out meaningful desyncs.
+      const k = 1 - Math.exp(-dt * 8);
+      p.x += dx * k;
+      p.y += dy * k;
     }
   }
 }
@@ -4231,19 +4375,44 @@ function render() {
 
   const camX = game.camera.x - game.camera.shakeX;
   const camY = game.camera.y - game.camera.shakeY;
+  game.view = { x0: camX, y0: camY, x1: camX + W, y1: camY + H };
   ctx.save();
   ctx.translate(-camX, -camY);
 
-  if (game.floorCanvas) ctx.drawImage(game.floorCanvas, 0, 0);
+  if (game.floorCanvas) {
+    const fw = game.floorCanvas.width, fh = game.floorCanvas.height;
+    let fx = camX, fy = camY, fwid = W, fhei = H;
+    if (fx < 0) { fwid += fx; fx = 0; }
+    if (fy < 0) { fhei += fy; fy = 0; }
+    if (fx + fwid > fw) fwid = fw - fx;
+    if (fy + fhei > fh) fhei = fh - fy;
+    if (fwid > 0 && fhei > 0) ctx.drawImage(game.floorCanvas, fx, fy, fwid, fhei, fx, fy, fwid, fhei);
+  }
 
-  const drawables = [];
-  for (const p of game.props) drawables.push({ y: p.y, fn: () => drawProp(ctx, p) });
-  for (const d of game.deposits) if (d.active) drawables.push({ y: d.y, fn: () => drawDeposit(ctx, d) });
-  for (const drop of game.drops) drawables.push({ y: drop.y, fn: () => drawDrop(ctx, drop) });
-  for (const rp of mp.remotePlayers.values()) drawables.push({ y: rp.y, fn: () => drawRemotePlayer(ctx, rp) });
-  drawables.push({ y: game.player.y, fn: () => drawPlayer(ctx) });
+  const drawables = game._drawables || (game._drawables = []);
+  drawables.length = 0;
+  for (const p of game.props) {
+    if (!inView(p.x, p.y, p.r * p.scale + 90)) continue;
+    drawables.push({ y: p.y, type: 0, ref: p });
+  }
+  for (const d of game.deposits) {
+    if (!d.active || !inView(d.x, d.y, d.r * 2 + 24)) continue;
+    drawables.push({ y: d.y, type: 1, ref: d });
+  }
+  for (const drop of game.drops) {
+    if (!inView(drop.x, drop.y, drop.r * 4 + 12)) continue;
+    drawables.push({ y: drop.y, type: 2, ref: drop });
+  }
+  for (const rp of mp.remotePlayers.values()) drawables.push({ y: rp.y, type: 3, ref: rp });
+  drawables.push({ y: game.player.y, type: 4, ref: null });
   drawables.sort((a, b) => a.y - b.y);
-  for (const item of drawables) item.fn();
+  for (const item of drawables) {
+    if (item.type === 0) drawProp(ctx, item.ref);
+    else if (item.type === 1) drawDeposit(ctx, item.ref);
+    else if (item.type === 2) drawDrop(ctx, item.ref);
+    else if (item.type === 3) drawRemotePlayer(ctx, item.ref);
+    else drawPlayer(ctx);
+  }
 
   drawParticles(ctx);
   drawFloaters(ctx);
@@ -4259,8 +4428,6 @@ function render() {
 
 function drawDeposit(ctx, d) {
   const t = game.time;
-  const rng = mulberry32(d.seed);
-  const pal = ROCK_PALETTES[game.mine.theme] || ROCK_PALETTES.mossy;
   const ore = d.oreId ? ORES[d.oreId] : null;
   const isTarget = game.target === d;
   const hit = d.hit || 0;
@@ -4279,75 +4446,15 @@ function drawDeposit(ctx, d) {
     const rad = d.r * (1.55 + ore.glow * 0.7);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const gl = ctx.createRadialGradient(0, -d.r * 0.15, 0, 0, -d.r * 0.15, rad);
-    gl.addColorStop(0, rgba(ore.color, 0.2 * ore.glow * pulse));
-    gl.addColorStop(0.55, rgba(ore.color, 0.07 * ore.glow * pulse));
-    gl.addColorStop(1, rgba(ore.color, 0));
-    ctx.fillStyle = gl;
-    ctx.beginPath(); ctx.arc(0, -d.r * 0.15, rad, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.2 * ore.glow * pulse;
+    const glow = glowSprite(ore.color, 0.35, 0.55);
+    ctx.drawImage(glow, -rad, -d.r * 0.15 - rad, rad * 2, rad * 2);
     ctx.restore();
   }
 
-  const lumps = [];
-  for (let i = 0; i < 3; i++) {
-    const a = rng() * TAU;
-    lumps.push({ x: Math.cos(a) * d.r * 0.45, y: Math.sin(a) * d.r * 0.3, r: d.r * (0.34 + rng() * 0.24) });
-  }
-  for (const l of lumps) {
-    const g = ctx.createRadialGradient(l.x - l.r * 0.3, l.y - l.r * 0.4, 0, l.x, l.y, l.r);
-    g.addColorStop(0, pal[0]);
-    g.addColorStop(0.7, pal[1]);
-    g.addColorStop(1, pal[2]);
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(l.x, l.y, l.r, 0, TAU); ctx.fill();
-  }
-
-  const pts = [];
-  const n = 11;
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * TAU;
-    const rr = d.r * (0.82 + rng() * 0.26);
-    pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.82]);
-  }
-  const bodyGrad = ctx.createLinearGradient(-d.r, -d.r, d.r * 0.8, d.r);
-  bodyGrad.addColorStop(0, pal[0]);
-  bodyGrad.addColorStop(0.5, pal[1]);
-  bodyGrad.addColorStop(1, pal[2]);
-  ctx.fillStyle = bodyGrad;
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.38)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.save();
-  ctx.clip();
-  const hl = ctx.createLinearGradient(0, -d.r, 0, d.r * 0.2);
-  hl.addColorStop(0, 'rgba(255,255,255,.17)');
-  hl.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = hl;
-  ctx.fillRect(-d.r * 1.3, -d.r * 1.3, d.r * 2.6, d.r * 1.6);
-  ctx.restore();
-
-  ctx.strokeStyle = 'rgba(0,0,0,.3)';
-  ctx.lineWidth = 1.4;
-  for (let i = 0; i < 3; i++) {
-    let x = (rng() - 0.5) * d.r;
-    let y = (rng() - 0.4) * d.r * 0.7;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    for (let s = 0; s < 3; s++) {
-      x += (rng() - 0.5) * 18;
-      y += (rng() - 0.3) * 14;
-      ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-
-  if (ore) drawOreCrystals(ctx, d, ore, rng);
+  const sprite = depositSprite(d);
+  const half = sprite.width / 2;
+  ctx.drawImage(sprite, -half, -half);
 
   if (isTarget) {
     const pulse = 0.5 + Math.sin(t * 7) * 0.25;
@@ -4573,18 +4680,18 @@ function drawDrop(ctx, drop) {
 
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  const gl = ctx.createRadialGradient(drop.x, drop.y + bob, 0, drop.x, drop.y + bob, drop.r * 3.2);
-  gl.addColorStop(0, rgba(ore.color, 0.3));
-  gl.addColorStop(0.5, rgba(ore.color, 0.08));
-  gl.addColorStop(1, rgba(ore.color, 0));
-  ctx.fillStyle = gl;
-  ctx.beginPath(); ctx.arc(drop.x, drop.y + bob, drop.r * 3.2, 0, TAU); ctx.fill();
+  ctx.globalAlpha = 0.3;
+  const rad = drop.r * 3.2;
+  const glow = glowSprite(ore.color, 0.2667, 0.5);
+  ctx.drawImage(glow, drop.x - rad, drop.y + bob - rad, rad * 2, rad * 2);
   ctx.restore();
 
+  const gs = gemSprite(ore);
+  const gscale = size / gs._base;
   ctx.save();
   ctx.translate(drop.x, drop.y + bob);
   ctx.rotate(Math.sin(drop.bob * 0.7) * 0.14);
-  drawGemShape(ctx, ore, 0, 0, size);
+  ctx.drawImage(gs, -gs.width / 2 * gscale, -gs.height / 2 * gscale, gs.width * gscale, gs.height * gscale);
   ctx.restore();
 }
 
@@ -4908,11 +5015,8 @@ function drawParticles(ctx) {
       ctx.arc(pt.x, pt.y, pt.size * (0.4 + prog * 1.5), 0, TAU);
       ctx.stroke();
     } else if (pt.type === 'flash') {
-      const g = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, pt.size);
-      g.addColorStop(0, pt.color);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.size, 0, TAU); ctx.fill();
+      const glow = glowSprite(pt.color, 0.5, 0.5);
+      ctx.drawImage(glow, pt.x - pt.size, pt.y - pt.size, pt.size * 2, pt.size * 2);
     } else if (pt.type === 'confetti') {
       ctx.translate(pt.x, pt.y);
       ctx.rotate(pt.rot);
@@ -4945,20 +5049,16 @@ function drawFloaters(ctx) {
 
 function punchLight(lc, x, y, r, strength) {
   if (r <= 0) return;
-  const g = lc.createRadialGradient(x, y, 0, x, y, r);
-  g.addColorStop(0, `rgba(0,0,0,${strength})`);
-  g.addColorStop(0.5, `rgba(0,0,0,${strength * 0.6})`);
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  lc.fillStyle = g;
-  lc.beginPath();
-  lc.arc(x, y, r, 0, TAU);
-  lc.fill();
+  lc.globalAlpha = clamp(strength, 0, 1);
+  lc.drawImage(lightHoleSprite(), x - r, y - r, r * 2, r * 2);
+  lc.globalAlpha = 1;
 }
 
 function drawLighting(ctx) {
   if (!state.settings.lighting) return;
   const lc = game.lightCtx, W = game.W, H = game.H;
-  lc.setTransform(1, 0, 0, 1, 0, 0);
+  const s = LIGHT_SCALE;
+  lc.setTransform(s, 0, 0, s, 0, 0);
   lc.globalCompositeOperation = 'source-over';
   lc.clearRect(0, 0, W, H);
   lc.fillStyle = 'rgba(3,6,14,.84)';
@@ -4970,15 +5070,23 @@ function drawLighting(ctx) {
   const flicker = 0.96 + Math.sin(game.time * 6.5) * 0.04;
   punchLight(lc, sx(game.player.x), sy(game.player.y), 305 * flicker, 0.95);
   for (const p of game.props) {
-    if (p.type === 'lantern') punchLight(lc, sx(p.x + 13 * p.scale), sy(p.y - 20 * p.scale), 205, 0.8);
-    else if (p.type === 'cluster' && game.mine.theme === 'mossy') punchLight(lc, sx(p.x), sy(p.y - 6), 55, 0.3);
+    if (p.type === 'lantern') {
+      if (inView(p.x, p.y, 240)) punchLight(lc, sx(p.x + 13 * p.scale), sy(p.y - 20 * p.scale), 205, 0.8);
+    } else if (p.type === 'cluster' && game.mine.theme === 'mossy' && inView(p.x, p.y, 90)) {
+      punchLight(lc, sx(p.x), sy(p.y - 6), 55, 0.3);
+    }
   }
-  for (const drop of game.drops) punchLight(lc, sx(drop.x), sy(drop.y), 52, 0.45);
+  for (const drop of game.drops) {
+    if (inView(drop.x, drop.y, 70)) punchLight(lc, sx(drop.x), sy(drop.y), 52, 0.45);
+  }
   for (const d of game.deposits) {
-    if (d.active && d.oreId && rarityRank(d.oreId) >= 3) punchLight(lc, sx(d.x), sy(d.y), d.r * 1.5, 0.3);
+    if (d.active && d.oreId && rarityRank(d.oreId) >= 3 && inView(d.x, d.y, d.r * 2)) {
+      punchLight(lc, sx(d.x), sy(d.y), d.r * 1.5, 0.3);
+    }
   }
 
   lc.globalCompositeOperation = 'source-over';
+  lc.globalAlpha = 1;
   ctx.drawImage(game.lightCanvas, 0, 0, W, H);
 }
 
@@ -5109,13 +5217,21 @@ function drawMinimap(ctx) {
   ctx.restore();
 }
 
+let _vignette = null, _vignetteKey = '';
 function drawVignette(ctx) {
   const W = game.W, H = game.H;
-  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.78);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, 'rgba(0,0,0,.42)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  const key = W + 'x' + H;
+  if (!_vignette || _vignetteKey !== key) {
+    _vignette = makeCanvas(W, H);
+    _vignetteKey = key;
+    const g = _vignette.getContext('2d');
+    const grd = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.78);
+    grd.addColorStop(0, 'rgba(0,0,0,0)');
+    grd.addColorStop(1, 'rgba(0,0,0,.42)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, W, H);
+  }
+  ctx.drawImage(_vignette, 0, 0);
 }
 // ============================================================
 // INIT
