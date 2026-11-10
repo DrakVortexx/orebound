@@ -397,7 +397,8 @@ function isSchemaMissing(error) {
     code === '42883' ||
     code === '42P01' ||
     code === '42703' ||
-    /could not find the function|does not exist in the schema|could not find the table|relation .* does not exist|column .* does not exist/i.test(message);
+    code === '42501' ||
+    /could not find the function|does not exist in the schema|could not find the table|relation .* does not exist|column .* does not exist|permission denied/i.test(message);
 }
 
 async function bumpPlayerStat(userId, column, amount) {
@@ -1993,8 +1994,21 @@ function breakDeposit(player, room, deposit, now) {
   room.lastActive = now;
 
   enqueue(player, async () => {
-    const deposits = await rpc('record_deposit_break', { p_user: player.id });
-    player.stats.depositsMined = Math.max(player.stats.depositsMined, toInt(deposits, player.stats.depositsMined));
+    let deposits = player.stats.depositsMined;
+    try {
+      deposits = toInt(await rpc('record_deposit_break', { p_user: player.id }), deposits);
+    } catch (error) {
+      if (!isSchemaMissing(error)) throw error;
+      await bumpPlayerStat(player.id, 'deposits_mined', 1).catch(statError => {
+        console.error(JSON.stringify({
+          level: 'error',
+          message: 'deposit_stat_fallback_failed',
+          userId: player.id,
+          db: describeDbError(statError)
+        }));
+      });
+    }
+    player.stats.depositsMined = Math.max(player.stats.depositsMined, deposits);
     scheduleAchievements(player);
   }).catch(error => {
     console.error(JSON.stringify({
@@ -2152,20 +2166,124 @@ function collectDrop(player, room, drop) {
   return true;
 }
 
+function xpNeededForLevel(level) {
+  return Math.floor(50 * Math.pow(Math.max(toInt(level, 1), 1), 1.5)) + 30;
+}
+
+async function applyMiningRewardFallback(player, room, drop, ore) {
+  const rewardId = drop.rewardId || randomUUID();
+  const unitValue = oreUnitValue(drop.oreId, room.mine.id);
+  const xpGain = oreXp(drop.oreId, room.mine);
+
+  const { data: eventRows, error: eventError } = await supabase
+    .from('reward_events')
+    .upsert({
+      id: rewardId,
+      user_id: player.id,
+      kind: 'ore:' + drop.oreId,
+      amount: 1
+    }, { onConflict: 'id', ignoreDuplicates: true })
+    .select('id');
+  if (eventError) throw eventError;
+  if (!eventRows || !eventRows.length) {
+    return [{ applied: false, quantity: 0, coins: player.coins, xp: player.xp, level: player.level }];
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('coins,xp,level')
+    .eq('id', player.id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  if (!profile) throw new GameError('profile_missing', 409);
+
+  const { data: stack, error: stackError } = await supabase
+    .from('inventory')
+    .select('quantity')
+    .eq('user_id', player.id)
+    .eq('ore_id', drop.oreId)
+    .eq('mine_id', room.mine.id)
+    .maybeSingle();
+  if (stackError) throw stackError;
+  const newQuantity = Math.max(0, toInt(stack && stack.quantity, 0)) + 1;
+
+  const { error: invError } = await supabase
+    .from('inventory')
+    .upsert({
+      user_id: player.id,
+      ore_id: drop.oreId,
+      mine_id: room.mine.id,
+      quantity: newQuantity,
+      unit_value: unitValue,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,ore_id,mine_id' });
+  if (invError) throw invError;
+
+  const { data: statsRow, error: statsError } = await supabase
+    .from('player_stats')
+    .select('ores_mined,rarest_tier,rarest_ore')
+    .eq('user_id', player.id)
+    .maybeSingle();
+  if (statsError) throw statsError;
+  const rarestTier = Math.max(toInt(statsRow && statsRow.rarest_tier, -1), ore.rarityRank);
+  const { error: statsUpdateError } = await supabase
+    .from('player_stats')
+    .update({
+      ores_mined: toInt(statsRow && statsRow.ores_mined, 0) + 1,
+      rarest_tier: rarestTier,
+      rarest_ore: ore.rarityRank > toInt(statsRow && statsRow.rarest_tier, -1) ? ore.id : (statsRow && statsRow.rarest_ore) || null,
+      updated_at: new Date().toISOString()
+    })
+    .eq('user_id', player.id);
+  if (statsUpdateError) throw statsUpdateError;
+
+  let xp = Math.max(0, toInt(profile.xp, 0)) + xpGain;
+  let level = Math.max(1, toInt(profile.level, 1));
+  while (xp >= xpNeededForLevel(level)) {
+    xp -= xpNeededForLevel(level);
+    level += 1;
+  }
+  const { error: profileUpdateError } = await supabase
+    .from('profiles')
+    .update({ xp, level, updated_at: new Date().toISOString() })
+    .eq('id', player.id);
+  if (profileUpdateError) throw profileUpdateError;
+
+  console.warn(JSON.stringify({
+    level: 'warn',
+    message: 'mining_reward_fallback_used',
+    userId: player.id,
+    oreId: drop.oreId
+  }));
+  return [{
+    applied: true,
+    quantity: newQuantity,
+    coins: Math.max(0, toInt(profile.coins, 0)),
+    xp,
+    level
+  }];
+}
+
 async function applyMiningReward(player, room, drop) {
   const ore = ORES[drop.oreId];
   if (!ore) throw new GameError('unknown_ore');
   const rewardId = drop.rewardId || randomUUID();
-  const data = await rpc('apply_mining_reward', {
-    p_reward_id: rewardId,
-    p_user: player.id,
-    p_ore_id: drop.oreId,
-    p_mine_id: room.mine.id,
-    p_quantity: 1,
-    p_unit_value: oreUnitValue(drop.oreId, room.mine.id),
-    p_xp: oreXp(drop.oreId, room.mine),
-    p_rarity_rank: ore.rarityRank
-  });
+  let data;
+  try {
+    data = await rpc('apply_mining_reward', {
+      p_reward_id: rewardId,
+      p_user: player.id,
+      p_ore_id: drop.oreId,
+      p_mine_id: room.mine.id,
+      p_quantity: 1,
+      p_unit_value: oreUnitValue(drop.oreId, room.mine.id),
+      p_xp: oreXp(drop.oreId, room.mine),
+      p_rarity_rank: ore.rarityRank
+    });
+  } catch (error) {
+    if (!isSchemaMissing(error)) throw error;
+    data = await applyMiningRewardFallback(player, room, drop, ore);
+  }
   const row = firstRow(data);
   if (!row) throw new GameError('server_error');
   if (!row.applied) return false;
