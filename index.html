@@ -283,6 +283,7 @@
   .server-info span{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .server-empty{padding:18px 6px;font-size:12px;color:var(--muted);font-weight:600;text-align:center}
   .fps-meter{position:absolute;right:14px;bottom:10px;font-size:10px;font-weight:800;letter-spacing:.8px;color:rgba(148,163,184,.75);font-variant-numeric:tabular-nums;pointer-events:none;z-index:5}
+  body.perf-mode #gameScreen *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
   .shop-card{
     background:linear-gradient(180deg,rgba(19,31,59,.9),rgba(10,18,37,.92));border:1px solid var(--line);
     border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;position:relative;transition:.18s;overflow:hidden;
@@ -1059,7 +1060,7 @@ function defaultState() {
       oresSold: 0, playTime: 0, rarestTier: -1, rarestOre: null, sessions: 0
     },
     achievements: [],
-    settings: { sound: true, particles: true, shake: true, lighting: true },
+    settings: { sound: true, particles: true, shake: true, lighting: true, performance: false },
     events: { active: [], nextAt: 0 },
     createdAt: Date.now(),
     lastSave: Date.now()
@@ -2066,6 +2067,7 @@ function closeModal() { const root = $('#modalRoot'); if (root) root.innerHTML =
 const ui = { view: 'home', shopTab: 'pickaxes', selected: new Set() };
 
 function syncUI() {
+  document.body.classList.toggle('perf-mode', !!(state.settings && state.settings.performance));
   if (!state) return;
   const topName = $('#topName');
   if (topName) topName.textContent = state.name;
@@ -2483,7 +2485,8 @@ function renderSettings() {
     { key: 'sound', name: 'Sound effects', desc: 'Synthesized mining, pickup, and interface sounds.' },
     { key: 'particles', name: 'Particle effects', desc: 'Sparks, dust, ore shards, and pickup bursts.' },
     { key: 'shake', name: 'Screen shake', desc: 'Impact feedback when deposits shatter.' },
-    { key: 'lighting', name: 'Cave lighting', desc: 'Dynamic darkness and lantern light underground.' }
+    { key: 'lighting', name: 'Cave lighting', desc: 'Dynamic darkness and lantern light underground.' },
+    { key: 'performance', name: 'Performance mode', desc: 'Disables blur/glow HUD effects and cave lighting for higher FPS.' }
   ];
   view.innerHTML = `
     <div class="view-head">
@@ -5175,7 +5178,7 @@ function punchLight(lc, x, y, r, strength) {
 }
 
 function drawLighting(ctx) {
-  if (!state.settings.lighting) return;
+  if (!state.settings.lighting || state.settings.performance) return;
   const lc = game.lightCtx, W = game.W, H = game.H;
   const s = LIGHT_SCALE;
   lc.setTransform(s, 0, 0, s, 0, 0);
