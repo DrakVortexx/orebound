@@ -228,7 +228,6 @@ const ERROR_STATUS = {
   invalid_password: 400,
   username_taken: 409,
   invalid_credentials: 401,
-  already_connected: 409,
   room_full: 409,
   room_limit: 503,
   not_in_mine: 409,
@@ -2515,13 +2514,6 @@ io.use(async (socket, next) => {
     if (existing) {
       const oldSocketId = existing.socketId;
       const oldSocket = oldSocketId ? io.sockets.sockets.get(oldSocketId) : null;
-      // One live session per account — a second tab/device is rejected
-      // while the first connection is still alive.
-      if (oldSocket && oldSocket.connected) {
-        const blocked = new Error('already_connected');
-        blocked.data = { code: 'already_connected' };
-        return next(blocked);
-      }
       existing.socketId = null;
       if (oldSocket) {
         oldSocket.emit('session:replaced');
