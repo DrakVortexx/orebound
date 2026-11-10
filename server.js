@@ -230,6 +230,7 @@ const ERROR_STATUS = {
   invalid_credentials: 401,
   room_full: 409,
   room_limit: 503,
+  server_not_found: 404,
   not_in_mine: 409,
   inventory_full: 409,
   mine_mismatch: 409,
@@ -1556,15 +1557,37 @@ app.post('/api/trades/cancel', requireAuth, (req, res) => {
 });
 
 function findRoomForMine(mineId) {
-  let emptyRoom = null;
+  const candidates = [];
   for (const room of rooms.values()) {
     if (room.mine.id !== mineId) continue;
-    if (!room.players.size && !emptyRoom) emptyRoom = room;
-    if (room.players.size < MAX_PLAYERS_PER_ROOM) return room;
+    if (room.players.size < MAX_PLAYERS_PER_ROOM) candidates.push(room);
   }
-  if (emptyRoom) return emptyRoom;
+  if (candidates.length) return candidates[Math.floor(Math.random() * candidates.length)];
   if (rooms.size >= MAX_ROOMS) throw new GameError('room_limit', 503);
   return createRoom(MINES[mineId]);
+}
+
+function publicRoom(room) {
+  return {
+    id: room.id,
+    name: room.name || null,
+    host: room.host || null,
+    mineId: room.mine.id,
+    players: room.players.size,
+    maxPlayers: MAX_PLAYERS_PER_ROOM,
+    full: room.players.size >= MAX_PLAYERS_PER_ROOM
+  };
+}
+
+function listServers() {
+  return Array.from(rooms.values())
+    .map(publicRoom)
+    .sort((a, b) => (a.full === b.full ? 0 : a.full ? 1 : -1) || (b.players - a.players) || a.id.localeCompare(b.id));
+}
+
+function sanitizeServerName(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24);
 }
 
 function createRoom(mine) {
@@ -1695,7 +1718,15 @@ async function startSessionFallback(player, mineId) {
 }
 
 async function joinMine(player, payload) {
-  const mineId = String(payload && payload.mineId || '');
+  const serverId = String(payload && payload.serverId || '');
+  let room = null;
+  let mineId = String(payload && payload.mineId || '');
+  if (serverId) {
+    room = rooms.get(serverId);
+    if (!room) throw new GameError('server_not_found', 404);
+    if (room.players.size >= MAX_PLAYERS_PER_ROOM) throw new GameError('room_full', 409);
+    mineId = room.mine.id;
+  }
   const mine = MINES[mineId];
   if (!mine) throw new GameError('unknown_mine');
   if (!player.mines.has(mineId)) throw new GameError('mine_locked', 403);
@@ -1721,7 +1752,7 @@ async function joinMine(player, payload) {
     player.currentMine = mineId;
   }
 
-  const room = findRoomForMine(mineId);
+  if (!room) room = findRoomForMine(mineId);
   let sessionId = 0;
   try {
     sessionId = toInt(await rpc('start_mine_session', { p_user: player.id, p_mine_id: mineId }), 0);
@@ -1767,6 +1798,8 @@ async function joinMine(player, payload) {
 
   return {
     roomId: room.id,
+    serverName: room.name || null,
+    serverHost: room.host || null,
     mine: { ...mine, weights: { ...mine.weights }, size: { ...mine.size } },
     world: { width: mine.size.w, height: mine.size.h, margin: WORLD_MARGIN },
     selfId: player.id,
@@ -1775,6 +1808,19 @@ async function joinMine(player, payload) {
     players: Array.from(room.players.values()).map(player => basicPlayer(player, room)),
     chat: room.chat.slice(-40)
   };
+}
+
+async function createServer(player, payload) {
+  const name = sanitizeServerName(payload && payload.name);
+  if (!name) throw new GameError('invalid_payload');
+  if (rooms.size >= MAX_ROOMS) throw new GameError('room_limit', 503);
+  const mineId = String(payload && payload.mineId || player.currentMine || 'mossy');
+  if (!MINES[mineId]) throw new GameError('unknown_mine');
+  if (!player.mines.has(mineId)) throw new GameError('mine_locked', 403);
+  const room = createRoom(MINES[mineId]);
+  room.name = name;
+  room.host = player.username;
+  return joinMine(player, { mineId, serverId: room.id });
 }
 
 async function leaveMine(player, reason) {
@@ -1999,7 +2045,7 @@ function breakDeposit(player, room, deposit, now) {
       deposits = toInt(await rpc('record_deposit_break', { p_user: player.id }), deposits);
     } catch (error) {
       if (!isSchemaMissing(error)) throw error;
-      await bumpPlayerStat(player.id, 'deposits_mined', 1).catch(statError => {
+      bumpPlayerStat(player.id, 'deposits_mined', 1).catch(statError => {
         console.error(JSON.stringify({
           level: 'error',
           message: 'deposit_stat_fallback_failed',
@@ -2174,68 +2220,35 @@ async function applyMiningRewardFallback(player, room, drop, ore) {
   const rewardId = drop.rewardId || randomUUID();
   const unitValue = oreUnitValue(drop.oreId, room.mine.id);
   const xpGain = oreXp(drop.oreId, room.mine);
+  const now = new Date().toISOString();
 
-  const { data: eventRows, error: eventError } = await supabase
-    .from('reward_events')
-    .upsert({
-      id: rewardId,
-      user_id: player.id,
-      kind: 'ore:' + drop.oreId,
-      amount: 1
-    }, { onConflict: 'id', ignoreDuplicates: true })
-    .select('id');
-  if (eventError) throw eventError;
-  if (!eventRows || !eventRows.length) {
+  const [eventRes, profileRes, stackRes, statsRes] = await Promise.all([
+    supabase.from('reward_events')
+      .upsert({
+        id: rewardId,
+        user_id: player.id,
+        kind: 'ore:' + drop.oreId,
+        amount: 1
+      }, { onConflict: 'id', ignoreDuplicates: true })
+      .select('id'),
+    supabase.from('profiles').select('coins,xp,level').eq('id', player.id).maybeSingle(),
+    supabase.from('inventory').select('quantity')
+      .eq('user_id', player.id).eq('ore_id', drop.oreId).eq('mine_id', room.mine.id)
+      .maybeSingle(),
+    supabase.from('player_stats').select('ores_mined,rarest_tier,rarest_ore')
+      .eq('user_id', player.id).maybeSingle()
+  ]);
+  for (const res of [eventRes, profileRes, stackRes, statsRes]) {
+    if (res.error) throw res.error;
+  }
+  if (!eventRes.data || !eventRes.data.length) {
     return [{ applied: false, quantity: 0, coins: player.coins, xp: player.xp, level: player.level }];
   }
-
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('coins,xp,level')
-    .eq('id', player.id)
-    .maybeSingle();
-  if (profileError) throw profileError;
+  const profile = profileRes.data;
   if (!profile) throw new GameError('profile_missing', 409);
 
-  const { data: stack, error: stackError } = await supabase
-    .from('inventory')
-    .select('quantity')
-    .eq('user_id', player.id)
-    .eq('ore_id', drop.oreId)
-    .eq('mine_id', room.mine.id)
-    .maybeSingle();
-  if (stackError) throw stackError;
-  const newQuantity = Math.max(0, toInt(stack && stack.quantity, 0)) + 1;
-
-  const { error: invError } = await supabase
-    .from('inventory')
-    .upsert({
-      user_id: player.id,
-      ore_id: drop.oreId,
-      mine_id: room.mine.id,
-      quantity: newQuantity,
-      unit_value: unitValue,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id,ore_id,mine_id' });
-  if (invError) throw invError;
-
-  const { data: statsRow, error: statsError } = await supabase
-    .from('player_stats')
-    .select('ores_mined,rarest_tier,rarest_ore')
-    .eq('user_id', player.id)
-    .maybeSingle();
-  if (statsError) throw statsError;
-  const rarestTier = Math.max(toInt(statsRow && statsRow.rarest_tier, -1), ore.rarityRank);
-  const { error: statsUpdateError } = await supabase
-    .from('player_stats')
-    .update({
-      ores_mined: toInt(statsRow && statsRow.ores_mined, 0) + 1,
-      rarest_tier: rarestTier,
-      rarest_ore: ore.rarityRank > toInt(statsRow && statsRow.rarest_tier, -1) ? ore.id : (statsRow && statsRow.rarest_ore) || null,
-      updated_at: new Date().toISOString()
-    })
-    .eq('user_id', player.id);
-  if (statsUpdateError) throw statsUpdateError;
+  const newQuantity = Math.max(0, toInt(stackRes.data && stackRes.data.quantity, 0)) + 1;
+  const oldRarestTier = toInt(statsRes.data && statsRes.data.rarest_tier, -1);
 
   let xp = Math.max(0, toInt(profile.xp, 0)) + xpGain;
   let level = Math.max(1, toInt(profile.level, 1));
@@ -2243,11 +2256,27 @@ async function applyMiningRewardFallback(player, room, drop, ore) {
     xp -= xpNeededForLevel(level);
     level += 1;
   }
-  const { error: profileUpdateError } = await supabase
-    .from('profiles')
-    .update({ xp, level, updated_at: new Date().toISOString() })
-    .eq('id', player.id);
-  if (profileUpdateError) throw profileUpdateError;
+
+  const [invRes, statsUpdRes, profUpdRes] = await Promise.all([
+    supabase.from('inventory').upsert({
+      user_id: player.id,
+      ore_id: drop.oreId,
+      mine_id: room.mine.id,
+      quantity: newQuantity,
+      unit_value: unitValue,
+      updated_at: now
+    }, { onConflict: 'user_id,ore_id,mine_id' }),
+    supabase.from('player_stats').update({
+      ores_mined: toInt(statsRes.data && statsRes.data.ores_mined, 0) + 1,
+      rarest_tier: Math.max(oldRarestTier, ore.rarityRank),
+      rarest_ore: ore.rarityRank > oldRarestTier ? ore.id : (statsRes.data && statsRes.data.rarest_ore) || null,
+      updated_at: now
+    }).eq('user_id', player.id),
+    supabase.from('profiles').update({ xp, level, updated_at: now }).eq('id', player.id)
+  ]);
+  for (const res of [invRes, statsUpdRes, profUpdRes]) {
+    if (res.error) throw res.error;
+  }
 
   console.warn(JSON.stringify({
     level: 'warn',
@@ -2343,62 +2372,44 @@ async function useConsumable(player, consumableId) {
 }
 
 async function sellInventoryItemFallback(player, oreId, mineId, quantity) {
-  const { data: stack, error } = await supabase
-    .from('inventory')
-    .select('quantity,unit_value')
-    .eq('user_id', player.id)
-    .eq('ore_id', oreId)
-    .eq('mine_id', mineId)
-    .maybeSingle();
-  if (error) throw error;
+  const now = new Date().toISOString();
+  const [stackRes, profileRes, statsRes] = await Promise.all([
+    supabase.from('inventory').select('quantity,unit_value')
+      .eq('user_id', player.id).eq('ore_id', oreId).eq('mine_id', mineId)
+      .maybeSingle(),
+    supabase.from('profiles').select('coins').eq('id', player.id).maybeSingle(),
+    supabase.from('player_stats').select('ores_sold,coins_earned').eq('user_id', player.id).maybeSingle()
+  ]);
+  for (const res of [stackRes, profileRes, statsRes]) {
+    if (res.error) throw res.error;
+  }
+  const stack = stackRes.data;
+  const profile = profileRes.data;
   if (!stack) throw new GameError('inventory_empty', 409);
+  if (!profile) throw new GameError('profile_missing', 409);
   const available = Math.max(0, toInt(stack.quantity, 0));
   const sold = Math.min(quantity, available);
   if (sold < 1) throw new GameError('inventory_empty', 409);
   const total = sold * Math.max(1, toInt(stack.unit_value, 1));
-
-  if (sold >= available) {
-    const { error: deleteError } = await supabase
-      .from('inventory')
-      .delete()
-      .eq('user_id', player.id)
-      .eq('ore_id', oreId)
-      .eq('mine_id', mineId);
-    if (deleteError) throw deleteError;
-  } else {
-    const { error: updateError } = await supabase
-      .from('inventory')
-      .update({ quantity: available - sold, updated_at: new Date().toISOString() })
-      .eq('user_id', player.id)
-      .eq('ore_id', oreId)
-      .eq('mine_id', mineId);
-    if (updateError) throw updateError;
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('coins')
-    .eq('id', player.id)
-    .maybeSingle();
-  if (profileError) throw profileError;
-  if (!profile) throw new GameError('profile_missing', 409);
   const coins = Math.max(0, toInt(profile.coins, 0)) + total;
-  const { error: coinsError } = await supabase
-    .from('profiles')
-    .update({ coins, updated_at: new Date().toISOString() })
-    .eq('id', player.id);
-  if (coinsError) throw coinsError;
 
-  try {
-    await bumpPlayerStat(player.id, 'ores_sold', sold);
-    await bumpPlayerStat(player.id, 'coins_earned', total);
-  } catch (statError) {
-    console.error(JSON.stringify({
-      level: 'error',
-      message: 'sell_fallback_stat_failed',
-      userId: player.id,
-      db: describeDbError(statError)
-    }));
+  const invWrite = sold >= available
+    ? supabase.from('inventory').delete()
+        .eq('user_id', player.id).eq('ore_id', oreId).eq('mine_id', mineId)
+    : supabase.from('inventory').update({ quantity: available - sold, updated_at: now })
+        .eq('user_id', player.id).eq('ore_id', oreId).eq('mine_id', mineId);
+
+  const [invRes, profRes, statsUpdRes] = await Promise.all([
+    invWrite,
+    supabase.from('profiles').update({ coins, updated_at: now }).eq('id', player.id),
+    supabase.from('player_stats').update({
+      ores_sold: toInt(statsRes.data && statsRes.data.ores_sold, 0) + sold,
+      coins_earned: toInt(statsRes.data && statsRes.data.coins_earned, 0) + total,
+      updated_at: now
+    }).eq('user_id', player.id)
+  ]);
+  for (const res of [invRes, profRes, statsUpdRes]) {
+    if (res.error) throw res.error;
   }
 
   console.warn(JSON.stringify({
@@ -2551,7 +2562,18 @@ function scheduleAchievements(player) {
 }
 
 async function checkAchievements(player) {
-  const data = await rpc('evaluate_achievements', { p_user: player.id, p_defs: ACHIEVEMENT_DEFS_PAYLOAD });
+  let data;
+  try {
+    data = await rpc('evaluate_achievements', { p_user: player.id, p_defs: ACHIEVEMENT_DEFS_PAYLOAD });
+  } catch (error) {
+    if (!isSchemaMissing(error)) throw error;
+    console.warn(JSON.stringify({
+      level: 'warn',
+      message: 'achievements_fallback_skipped',
+      userId: player.id
+    }));
+    return [];
+  }
   const rows = Array.isArray(data) ? data : (data ? [data] : []);
   if (!rows.length) return [];
   let rewardTotal = 0;
@@ -2661,6 +2683,22 @@ io.on('connection', socket => {
   socket.emit('session:ready', {
     player: publicPlayer(player),
     config: getConfig()
+  });
+
+  socket.on('server:list', (payload, ack) => {
+    if (!rateLimit(player, 'serverlist', 30, 10000)) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'rate_limited' });
+      return;
+    }
+    handleAck(ack, Promise.resolve({ servers: listServers() }));
+  });
+
+  socket.on('server:create', (payload, ack) => {
+    if (!rateLimit(player, 'servercreate', 5, 60000)) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'rate_limited' });
+      return;
+    }
+    handleAck(ack, enqueue(player, () => createServer(player, payload)));
   });
 
   socket.on('mine:join', (payload, ack) => {

@@ -265,6 +265,23 @@
   .tab-btn:hover{color:#fff;background:rgba(96,165,250,.08)}
   .tab-btn.active{color:#fff;background:linear-gradient(180deg,rgba(59,130,246,.3),rgba(59,130,246,.13));box-shadow:inset 0 0 0 1px rgba(96,165,250,.32)}
   .shop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .server-create{display:flex;gap:10px;margin-bottom:12px}
+  .server-create input{
+    flex:1;min-width:0;background:rgba(8,15,32,.55);border:1px solid var(--line);border-radius:11px;
+    padding:10px 14px;font-size:13px;font-weight:700;color:var(--text);outline:none;transition:.15s;
+  }
+  .server-create input:focus{border-color:rgba(96,165,250,.5);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+  .server-create input::placeholder{color:var(--muted);font-weight:600}
+  .server-list{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto}
+  .server-row{
+    display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:12px;
+    background:rgba(8,15,32,.4);border:1px solid var(--line);transition:.15s;
+  }
+  .server-row:hover{border-color:rgba(96,165,250,.28)}
+  .server-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .server-info b{font-size:13px;font-weight:900;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .server-info span{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .server-empty{padding:18px 6px;font-size:12px;color:var(--muted);font-weight:600;text-align:center}
   .shop-card{
     background:linear-gradient(180deg,rgba(19,31,59,.9),rgba(10,18,37,.92));border:1px solid var(--line);
     border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;position:relative;transition:.18s;overflow:hidden;
@@ -1326,7 +1343,9 @@ const mp = {
   remotePlayers: new Map(),
   selfServer: null,
   connecting: null,
-  joinPending: null
+  joinPending: null,
+  roomName: null,
+  servers: null
 };
 
 function mpRemoteUpsert(p) {
@@ -1515,7 +1534,14 @@ async function mpConnectInner() {
     }
   });
   s.on('connect', () => {
-    if (game.active && game.mine && !mp.roomId && !mp.joinPending) void mpJoinRoom(game.mine.id);
+    if (!game.active || !game.mine || mp.joinPending) return;
+    if (mp.roomId) {
+      const roomId = mp.roomId;
+      mp.roomId = null;
+      void mpJoinServer(roomId);
+    } else {
+      void mpJoinRoom(game.mine.id);
+    }
   });
   s.on('session:ready', (data) => {
     if (data && data.player) onServerPlayer(data.player);
@@ -1548,36 +1574,66 @@ async function mpConnectInner() {
   return s;
 }
 
-async function mpJoinRoom(mineId) {
+function handleJoinAck(ack) {
+  mp.joinPending = null;
+  if (!ack || !ack.ok) {
+    toast('Cannot enter mine', authErrText(ack && ack.error), 'red', 'x');
+    exitGame(false);
+    return;
+  }
+  mp.roomId = ack.roomId;
+  mp.selfId = ack.selfId;
+  mp.roomName = ack.serverName || null;
+  const worldMine = ack.mine && ack.mine.id ? MINES.find(m => m.id === ack.mine.id) : null;
+  if (worldMine && game.mine && worldMine.id !== game.mine.id) applyWorldMine(worldMine);
+  game.deposits = (ack.deposits || []).map(mpDepositFromServer);
+  for (const d of game.deposits) depositSprite(d);
+  game.drops = (ack.drops || []).map(mpDropFromServer);
+  mp.remotePlayers.clear();
+  for (const p of ack.players || []) mpRemoteUpsert(p);
+  mp.selfServer = null;
+  mpChatClear();
+  if (Array.isArray(ack.chat)) for (const m of ack.chat) mpChatAdd(m);
+  renderHotbar();
+  updateBuffChips();
+}
+
+async function mpSendJoin(event, body, tag) {
   try {
     const s = await mpConnect();
     if (mp.roomId) return;
-    mp.joinPending = mineId;
-    s.emit('mine:join', { mineId }, (ack) => {
-      mp.joinPending = null;
-      if (!ack || !ack.ok) {
-        toast('Cannot enter mine', authErrText(ack && ack.error), 'red', 'x');
-        exitGame(false);
-        return;
-      }
-      mp.roomId = ack.roomId;
-      mp.selfId = ack.selfId;
-      game.deposits = (ack.deposits || []).map(mpDepositFromServer);
-      for (const d of game.deposits) depositSprite(d);
-      game.drops = (ack.drops || []).map(mpDropFromServer);
-      mp.remotePlayers.clear();
-      for (const p of ack.players || []) mpRemoteUpsert(p);
-      mp.selfServer = null;
-      mpChatClear();
-      if (Array.isArray(ack.chat)) for (const m of ack.chat) mpChatAdd(m);
-      renderHotbar();
-      updateBuffChips();
-    });
+    mp.joinPending = tag;
+    s.emit(event, body, (ack) => handleJoinAck(ack));
   } catch (e) {
     mp.joinPending = null;
     toast('Cannot enter mine', authErrText(e.code || e.message), 'red', 'x');
     exitGame(false);
   }
+}
+
+function mpJoinRoom(mineId, serverId) {
+  return mpSendJoin('mine:join', serverId ? { serverId } : { mineId }, serverId || mineId);
+}
+
+function mpJoinServer(serverId) {
+  return mpSendJoin('mine:join', { serverId }, serverId);
+}
+
+function mpCreateServer(name) {
+  return mpSendJoin('server:create', { name }, name);
+}
+
+async function mpListServers() {
+  try {
+    const s = await mpConnect();
+    s.emit('server:list', {}, (ack) => {
+      if (ack && ack.ok && Array.isArray(ack.servers)) {
+        mp.servers = ack.servers;
+        const el = $('#serverList');
+        if (el) el.innerHTML = serversListHTML();
+      }
+    });
+  } catch { /* socket unavailable — list stays as-is */ }
 }
 
 function mpSendInput() {
@@ -1607,6 +1663,7 @@ function mpLeaveRoom() {
   mp.selfId = null;
   mp.selfServer = null;
   mp.joinPending = null;
+  mp.roomName = null;
   mp.remotePlayers.clear();
   mpChatClear();
 }
@@ -2022,7 +2079,8 @@ function syncUI() {
     $('#hudLevel').textContent = state.level;
     const need = xpNeeded(state.level);
     $('#hudXpFill').style.width = clamp((state.xp / need) * 100, 0, 100) + '%';
-    $('#hudMine').textContent = currentMine().name + (mp.roomId ? ` · ${mp.remotePlayers.size} miner${mp.remotePlayers.size === 1 ? '' : 's'}` : '');
+    const roomLabel = mp.roomName ? ` · ${mp.roomName}` : '';
+    $('#hudMine').textContent = currentMine().name + roomLabel + (mp.roomId ? ` · ${mp.remotePlayers.size} miner${mp.remotePlayers.size === 1 ? '' : 's'}` : '');
     updateInvMeter();
     if (game.active) { renderHotbar(); updateBuffChips(); }
   }
@@ -2170,8 +2228,40 @@ function renderHome() {
         </div>
       </div>
     </div>
+    <div class="section-gap"></div>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">${icon('users')} Servers</div>
+        <button class="panel-link" data-action="refresh-servers">Refresh</button>
+      </div>
+      <div class="panel-body">
+        <div class="server-create">
+          <input id="serverName" maxlength="24" placeholder="Name your server…" autocomplete="off">
+          <button class="btn primary sm" data-action="create-server">Create Server</button>
+        </div>
+        <div id="serverList" class="server-list">${serversListHTML()}</div>
+      </div>
+    </div>
     ${mineLockedNext ? `<div class="section-gap"></div><div class="panel"><div class="panel-head"><div class="panel-title">${icon('map')} Next Destination</div></div><div class="panel-body" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div style="font-size:16px;font-weight:900">${mineLockedNext.name}</div><div style="font-size:12px;color:var(--muted);margin-top:3px">Requires level ${mineLockedNext.level} and ${fmt(mineLockedNext.cost)} coins to unlock.</div></div><button class="btn ghost" data-action="open-mines">View Mines ${icon('arrow')}</button></div></div>` : ''}
   `;
+  void mpListServers();
+}
+
+function serversListHTML() {
+  if (mp.servers === null) return `<div class="server-empty">Loading servers…</div>`;
+  if (!mp.servers.length) return `<div class="server-empty">No public servers yet — press Enter Mine to start one, or create one above.</div>`;
+  return mp.servers.map(s => {
+    const mine = MINES.find(m => m.id === s.mineId);
+    const locked = !state.minesUnlocked.includes(s.mineId);
+    const disabled = s.full || locked;
+    return `<div class="server-row">
+      <div class="server-info">
+        <b>${escapeHtml(s.name || 'Public Lobby')}</b>
+        <span>${escapeHtml(s.host || 'Host')} · ${mine ? mine.name : s.mineId} · ${s.players}/${s.maxPlayers} miners</span>
+      </div>
+      <button class="btn sm ${disabled ? 'ghost' : 'primary'}" data-action="join-server" data-id="${escapeHtml(s.id)}" ${disabled ? 'disabled' : ''}>${s.full ? 'Full' : locked ? 'Locked' : 'Join'}</button>
+    </div>`;
+  }).join('');
 }
 
 function renderInventory() {
@@ -3011,6 +3101,15 @@ document.addEventListener('click', (e) => {
     return;
   }
   if (action === 'enter-mine') { enterMine(); return; }
+  if (action === 'join-server') { enterMine(() => mpJoinServer(el.dataset.id)); return; }
+  if (action === 'create-server') {
+    const input = $('#serverName');
+    const name = input ? input.value.trim().slice(0, 24) : '';
+    if (!name) { toast('Server name required', 'Give your server a name first.', 'red', 'x'); return; }
+    enterMine(() => mpCreateServer(name));
+    return;
+  }
+  if (action === 'refresh-servers') { void mpListServers(); Sound.ui(); return; }
   if (action === 'select-slot') { selectSlot(Number(el.dataset.slot)); return; }
   if (action === 'open-mines' || action === 'change-mine') {
     ui.shopTab = 'mines';
@@ -3446,7 +3545,7 @@ function gemSprite(ore) {
   return c;
 }
 
-function enterMine() {
+function enterMine(joinAction) {
   Sound.init();
   const mine = currentMine();
   game.mine = mine;
@@ -3491,7 +3590,8 @@ function enterMine() {
   syncUI();
   game.last = performance.now();
   if (!game.raf) game.raf = requestAnimationFrame(loop);
-  void mpJoinRoom(mine.id);
+  if (joinAction) joinAction();
+  else void mpJoinRoom(mine.id);
 }
 
 function exitGame(showDash = true) {
@@ -3855,6 +3955,21 @@ function generateProps() {
   // so keeping them solid would desync positions near props.
   if (cloudReady) for (const pr of props) pr.solid = false;
   game.props = props;
+}
+
+function applyWorldMine(mine) {
+  game.mine = mine;
+  game.worldW = mine.size.w;
+  game.worldH = mine.size.h;
+  generateFloor();
+  generateProps();
+  game.camera = { x: 0, y: 0, shake: 0, shakeX: 0, shakeY: 0 };
+  if (game.player) {
+    game.player.x = game.worldW / 2;
+    game.player.y = game.worldH / 2;
+    game.player.vx = 0;
+    game.player.vy = 0;
+  }
 }
 
 function chooseOreId() {
